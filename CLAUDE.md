@@ -37,7 +37,7 @@ Targets: **Windows first** (10/11, x64), **Linux second** (Ubuntu LTS and Kali r
 │                 │           │ OriginalDestinationTable      │
 │  Platform module (selected at runtime)                      │
 │   Windows: WinDivertCapture | InjectionCapture (Detours)    │
-│   Linux:   BpfCapture / NftCapture | PreloadCapture (later) │
+│   Linux:   BpfCapture (eBPF)    | PreloadCapture (LD_PRELOAD)│
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -113,10 +113,40 @@ The user chooses the capture mode in config (`settings.capture.mode`).
   refuse unsigned DLLs; raw syscalls / custom stacks bypass it. Recommend `windivert` mode in those cases.
 - UDP in injection mode is `direct` or `block` only (rule `udp` fallback, QUIC blocking) until implemented.
 
-**Linux (later)**
-- `ebpf` (default): `cgroup/connect4`, `cgroup/connect6`, `cgroup/sendmsg4/6` programs on the root cgroup rewrite the destination to the relay and store the original in a BPF map. Target PIDs/cgroups are pushed into a BPF map by the service, tracking process exec events. BPF C sources in `native/linux/bpf`, loaded via libbpf (P/Invoke).
-- `nftables` fallback: move matched processes into a Proxynator cgroup, `socket cgroupv2` match + `redirect`/`tproxy`, original destination via `SO_ORIGINAL_DST`.
-- `preload` (opt-in, the Linux equivalent of `injection`): `LD_PRELOAD` shared object in `native/linux/preload`, same registration protocol over a Unix domain socket.
+**Linux – `ebpf` (default, kernel-level, machine-wide)** — see ADR 0005
+- `native/linux/bpf/proxynator.bpf.c` (clang `-target bpf`, license "Dual MIT/GPL"), loaded by `BpfCaptureBackend`
+  through the system libbpf (P/Invoke, `libbpf.so.1` or `.so.0`). Programs on the **root cgroup v2** (found in
+  `/proc/self/mountinfo`; `/sys/fs/cgroup` or `/sys/fs/cgroup/unified`) as `bpf_link`s owned by the service: when it
+  exits, the kernel detaches them (golden rule 4 for free).
+- Only stable UAPI context fields plus two CO-RE `task_struct` fields (`pid`, `tgid`, `preserve_access_index`), so one
+  object works on every kernel with BTF. Tracepoints are `tp_btf/*` (no tracefs needed; the classic
+  `sched_process_fork` format changed in 6.x, so never parse tracepoint records by offset).
+- Process classification lives in the `decisions` map (tgid → flags: TARGET, IGNORE, UDP_BLOCK_QUIC, UDP_BLOCK,
+  DNS_REDIRECT), computed in userspace by `ProcessClassifier.Decide` (`RuleEngine.MayRelay`: could any non-direct rule
+  apply, judging by process criteria only). Fork copies the parent's value (in BPF, synchronously), exec deletes it
+  and notifies the service (ring buffer → `Classify`), exit deletes it. The service classifies all running processes
+  at start and after every config change.
+- TCP: `cgroup/connect4/6` rewrite candidates' connects to the loopback relay (v4-mapped → `::ffff:127.0.0.1`), store
+  the original by socket cookie; `sockops` (`TCP_CONNECT_CB`) re-keys it by local port; the relay finds it through
+  `OriginalDestinationTable.ExternalSource` (`BpfCaptureBackend.TryTake`). **Unclassified processes also go to the
+  relay** (relay-first), which classifies them on the spot: nothing can slip past before the service knows a process.
+- UDP: `connect4/6` + `sendmsg4/6` block (EPERM) or pass per the process flags; no UDP relaying. Remote DNS: UDP/53 of
+  candidates (also to the 127.0.0.53 stub) goes to `DnsForwarder` (Core), `recvmsg4/6` rewrites the reply source
+  back to the server the program asked. So remote DNS is per process here.
+- Always excluded: the service's tgid, loopback/unspecified destinations, configured proxy endpoints (`excluded`
+  map, refreshed on config change).
+
+**Linux – `preload` (user-mode, opt-in)**
+- `native/linux/preload/*.c` → `libproxynator-preload.so` (C11, no C++ runtime in target processes). Same
+  registration protocol as the Windows hook (`protocol.c` mirrors `HookProtocol.cs`; keep in sync) over the Unix
+  socket `<endpoint>.hook` (mode 0666; PID from `SO_PEERCRED`), served by `PreloadCaptureBackend` with the shared
+  `HookRequestHandler`/`HookSession`.
+- Hooks `connect`, `getpeername`, `close`, `sendto`, `sendmsg`, `sendmmsg`, `getaddrinfo`, `gethostbyname`. Inactive
+  unless `PROXYNATOR_HOOK_ENDPOINT` is set; `pthread_atfork` makes children reconnect (the service identifies them by
+  peer credentials). `proxynator run` (`PreloadLauncher`) sets `LD_PRELOAD` + the endpoint; children inherit them.
+- Escapes (documented): static/Go binaries, raw syscalls, setuid programs and sudo (drop `LD_PRELOAD`). No `attach`.
+- `nftables` mode: not implemented (all supported distributions have BPF + BTF); choosing it leaves capture
+  `FAILED` with a clear message.
 
 ### DNS handling (`settings.dns.mode`, user-selectable)
 
@@ -134,7 +164,7 @@ Connections to fake addresses always go to the relays, which use the hostname: p
 resolve it with `ModeAwareResolver`, which queries the upstream DNS servers directly (`UpstreamDnsResolver`) while
 remote mode is on — the system resolver would return Proxynator's own fake answers.
 
-Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost.exe`), not by the app, so per-process attribution of DNS packets is impossible in `windivert` mode. `remote` mode in `windivert` is therefore applied system-wide for the listed domains (relay sends non-proxied fake-IP connections direct after real resolution). That includes the service's own process and in-process tests: resolve real addresses before turning remote mode on. In `injection` mode the resolver hooks make it per-process (`preload` will too). Apps using their own DoH just look like ordinary TCP/443 flows and are handled by the rules.
+Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost.exe`), not by the app, so per-process attribution of DNS packets is impossible in `windivert` mode. `remote` mode in `windivert` is therefore applied system-wide for the listed domains (relay sends non-proxied fake-IP connections direct after real resolution). That includes the service's own process and in-process tests: resolve real addresses before turning remote mode on. In `injection`, `preload` and `ebpf` modes it is per-process (resolver hooks, or the eBPF DNS redirect of candidate processes). Apps using their own DoH just look like ordinary TCP/443 flows and are handled by the rules.
 
 ### UDP
 
@@ -156,7 +186,11 @@ Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost
 - Child-process matching uses `ProcessTree` (Core): processes keyed by (PID, creation time), exited ones remembered
   for 10 minutes, a parent only accepted if it is older than its child (PID reuse). On Windows it is fed by a
   Toolhelp snapshot every 2 s and on every unknown PID, so launcher → `python.exe` chains (pipx tools) still match
-  after the launcher exits. Linux will feed it from the proc connector/BPF.
+  after the launcher exits. On Linux it is fed from `/proc` (`LinuxProcessInfoProvider`); a cached entry is reused
+  only while start time and `comm` are unchanged (exec keeps the PID).
+- Process patterns also match `ProcessInfo.ScriptPath`, the script an interpreter runs. Linux (`ProcessIdentity`):
+  a shebang script is named after the script by the kernel (pipx's `nxc`); `python3 tool.py` and
+  `#!/usr/bin/env python3` are named after the interpreter, with the script as `ScriptPath`.
 
 ### Proxies and chains
 
@@ -183,7 +217,8 @@ Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost
   served side by side.
 - Restrict access: anyone who can talk to the service can redirect traffic. Pipe ACL = SYSTEM + Administrators + the
   account running the service (in console mode that is the user who started it, so their CLI works without
-  elevation; as LocalSystem the CLI must run elevated). Unix socket mode `0660` (`root:proxynator` group in phase 5).
+  elevation; as LocalSystem the CLI must run elevated). Unix socket mode `0660`, group `proxynator` when it exists
+  (the `.deb` creates it) so its members can use the CLI without sudo.
 - Configuration is exchanged as JSON text (the config file format is the single source of truth). `config validate`
   runs locally in the CLI; `ApplyConfig` validates again in the service and can persist the file atomically.
 
@@ -220,7 +255,9 @@ src/
                                    Interop/, Packets/), InjectionCaptureBackend (hook pipe), Injection/ (HookInjector,
                                    command line quoting, PATH lookup), process info with ancestors, admin check,
                                    firewall rule
-  Proxynator.Platform.Linux/       (later) eBPF/nftables capture, preload controller, root check
+  Proxynator.Platform.Linux/       LinuxPlatformModule, BpfCaptureBackend (+ ProcessClassifier, EventCallback),
+                                   PreloadCaptureBackend, Preload/PreloadLauncher, Interop/ (libbpf, libc, BpfMap),
+                                   /proc process info + ProcessIdentity, capabilities check, cgroup2 discovery
   Proxynator.Ipc/                  .proto contracts, generated client/server, ControlClientFactory, IpcEndpoint
   Proxynator.Service/              proxynatord: ServiceHost (Kestrel on pipe/socket, Windows service, systemd),
                                    ProxynatorEngine, ControlService (gRPC), platform selection
@@ -229,17 +266,21 @@ src/
   Proxynator.Gui/                  (later) Avalonia GUI (thin IPC client)
 build/
   WinDivert.targets                pinned WinDivert download + verification, imported by executables
-  NativeHook.targets               copies the hook DLLs from artifacts/native, imported by executables
+  NativeArtifacts.targets          copies native parts from artifacts/native/<rid>, imported by executables
   build-native.ps1                 builds the hook DLLs (CMake + MSVC, x64 and x86)
+  build-native.sh                  builds proxynator.bpf.o and libproxynator-preload.so (clang, libbpf-dev, gcc)
+  package-deb.sh                   .deb from a linux-x64 publish (systemd unit, /etc config, proxynator group)
 native/
   windows/hook/                    C++ Detours hook DLL (x64 + x86)
-  linux/preload/                   (later) LD_PRELOAD .so
-  linux/bpf/                       (later) eBPF programs
+  linux/preload/                   C LD_PRELOAD library
+  linux/bpf/                       eBPF programs (one object)
+packaging/linux/                   systemd unit, default /etc/proxynator/config.json
 tests/
   Proxynator.Core.Tests/           Pure unit tests, run on both OSes (Support/ has fake proxies, echo server)
   Proxynator.Platform.Windows.Tests/  NAT, packet parsing, interop struct layouts; run on both OSes
+  Proxynator.Platform.Linux.Tests/ /proc, mountinfo, capability parsing, process identity, eBPF classification; both OSes
   Proxynator.Service.Tests/        In-process proxynatord + CLI over a real pipe/socket, fake platform module
-  Proxynator.IntegrationTests/     Real WinDivert and injection capture with curl.exe etc.; elevated Windows + internet only;
+  Proxynator.IntegrationTests/     Real capture in all four modes (curl, python, ...); elevated Windows / root on Linux;
                                    tagged [Trait("Category","Integration")], skipped elsewhere unless
                                    PROXYNATOR_REQUIRE_INTEGRATION=1 (CI), which turns a skip into a failure
 schema/                            config JSON schema (keep in sync with the config model)
@@ -274,15 +315,16 @@ Requires the .NET 10 SDK (`global.json` pins the 10.0 feature band, rolling forw
 
 ```
 ./build/build-native.ps1                               # Windows: hook DLLs (CMake + VS C++ workload); optional
+./build/build-native.sh                                # Linux: eBPF object + preload library; optional
 dotnet build Proxynator.sln -c Release
 dotnet test Proxynator.sln --filter "Category!=Integration"
-dotnet test tests/Proxynator.IntegrationTests          # elevated Windows with internet access only
+dotnet test tests/Proxynator.IntegrationTests          # elevated Windows (internet) or root on Linux
 ```
 
 The native sources can be syntax-checked on Linux with MinGW (`x86_64-w64-mingw32-g++` / `i686-w64-mingw32-g++
 -std=c++17 -fsyntax-only -I<detours>/src ...`); the real build is MSVC in CI.
 
-Run locally (elevated on Windows; on Linux only with `--no-capture` until phase 5):
+Run locally (elevated on Windows, root on Linux; `--no-capture` runs without privileges or capture):
 
 ```
 dotnet run --project src/Proxynator.Service -- --config ./samples/config.json --verbose
@@ -293,9 +335,14 @@ On Linux, `-p:IncludeWinDivert=true` forces the WinDivert download (e.g. to chec
 Windows publish (`dotnet publish src/Proxynator.Service -c Release -r win-x64 --self-contained`) can be produced from
 Linux too.
 
-CI (`.github/workflows/ci.yml`) builds and unit-tests in Release on `windows-latest` and `ubuntu-latest`; on the
-Windows runner it first builds the hook DLLs (x64 + x86), runs the WinDivert and injection integration tests
-(elevated) and uploads a self-contained `proxynator-win-x64` build.
+CI (`.github/workflows/ci.yml`) builds and unit-tests in Release on `windows-latest` and `ubuntu-latest`. Windows:
+builds the hook DLLs (x64 + x86) first, runs the WinDivert and injection integration tests (elevated) and uploads a
+self-contained `proxynator-win-x64` build. Linux: builds the eBPF object and preload library first, packages and
+uploads `proxynator-linux-x64-deb`, then runs the eBPF and preload integration tests with sudo (last, so no
+root-owned files affect other steps). Tests for the other OS skip; on the right OS a skip is a failure in CI.
+
+This container-style environment can run the Linux integration tests too (root, BPF, cgroup v2): `sudo dotnet test
+tests/Proxynator.IntegrationTests --filter FullyQualifiedName~LinuxCaptureTests` after `build/build-native.sh`.
 
 Before pushing: build with zero warnings (warnings are errors) and run the unit tests. Network tests run in
 parallel, so run the suite a few times when touching the relay or proxy code to catch races. Code that only runs on
@@ -319,6 +366,12 @@ Windows (WinDivert, Win32) is only exercised by CI's Windows job; check it after
   processes.
 - `cmd.exe` does not parse its command line like the C runtime: build `cmd /d /s /c "..."` lines by hand, don't
   pass them through `WindowsCommandLine.Join`.
+- eBPF mode: a program's `getpeername` (curl's `remote_ip`) shows the relay, because the kernel rewrote the
+  destination; don't assert on it.
+- Types in `Proxynator.Platform.Linux` are `[SupportedOSPlatform("linux")]` per type, not per assembly; keep pure
+  logic (parsers, `ProcessClassifier`, `Capabilities`) unattributed so its tests also build and run on Windows.
+- The BPF `config` struct, `origin` and `endpoint_key` layouts are mirrored in `BpfCaptureBackend`; ports are network
+  byte order, `sockops` local ports host order.
 
 ## Roadmap
 
@@ -327,6 +380,7 @@ Windows (WinDivert, Win32) is only exercised by CI's Windows job; check it after
 - [x] Phase 2 — Windows `windivert` TCP capture, PID attribution, exclusions, privilege check, `proxynatord` (console + Windows service), gRPC IPC, basic CLI (`status`, `config load|validate`, `rules list`, `connections`, `doctor`).
 - [x] Phase 3 — DNS modes (`sniff`, `remote` fake-IP), UDP capture + relay via SOCKS5, QUIC blocking, child-process matching with process history.
 - [x] Phase 4 — Windows `injection` mode (Detours hook DLL x64/x86, `run`, `attach`, child propagation, per-process remote DNS).
-- [ ] Phase 5 — Linux: `ebpf` + `nftables` capture, `preload` mode, systemd unit, `.deb` packaging for Ubuntu/Kali.
+- [x] Phase 5 — Linux: `ebpf` capture, `preload` mode, systemd unit, `.deb` packaging for Ubuntu/Kali. (`nftables`
+  fallback not implemented: every supported distribution has BPF and BTF.)
 - [ ] Phase 6 — Avalonia GUI.
 - [ ] Later — connection log export, pcap output, statistics, `https` (TLS-to-proxy) hops, ARM64 (Linux first; WinDivert has no ARM64 build).

@@ -14,3 +14,10 @@ Third-party components (bundled or downloaded at build time):
 
 - Microsoft Detours (https://github.com/microsoft/Detours)
   Copyright Microsoft Corporation. Licensed under the MIT License.
+
+- libbpf (https://github.com/libbpf/libbpf)
+  Licensed under LGPL-2.1 OR BSD-2-Clause. Not bundled: the system's library is
+  loaded dynamically by the Linux ebpf capture mode.
+
+The eBPF program in native/linux/bpf is dual-licensed under the MIT License
+and GPL-2.0-only (the kernel requires a GPL-compatible license for it).
