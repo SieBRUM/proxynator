@@ -33,6 +33,20 @@ public static class ControlClientFactory
 
     private static async ValueTask<Stream> ConnectAsync(string endpoint, CancellationToken cancellationToken)
     {
+        try
+        {
+            return await ConnectCoreAsync(endpoint, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // A missing named pipe is not an error on Windows, the connect just waits. Report the timeout as an I/O
+            // failure so gRPC surfaces it as Unavailable (like a refused Unix socket) instead of a cancellation.
+            throw new IOException($"Timed out after {ConnectTimeout.TotalSeconds:0}s connecting to {IpcEndpoint.Describe(endpoint)}.", ex);
+        }
+    }
+
+    private static async ValueTask<Stream> ConnectCoreAsync(string endpoint, CancellationToken cancellationToken)
+    {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ConnectTimeout);
 
