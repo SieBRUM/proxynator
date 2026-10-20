@@ -68,7 +68,9 @@ jobs:
         run: |
           dotnet publish src/Proxynator.Service -c Release -r win-x64 --self-contained -o publish/proxynator-win-x64
           dotnet publish src/Proxynator.Cli -c Release -r win-x64 --self-contained -o publish/proxynator-win-x64
-          Copy-Item samples/config.json, LICENSE, NOTICE publish/proxynator-win-x64/
+          New-Item -ItemType Directory -Force publish/proxynator-win-x64/samples | Out-Null
+          Copy-Item samples/*.json publish/proxynator-win-x64/samples/
+          Copy-Item LICENSE, NOTICE publish/proxynator-win-x64/
 
       - name: Upload Windows build
         if: runner.os == 'Windows'
