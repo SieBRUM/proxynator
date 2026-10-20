@@ -21,6 +21,7 @@ public sealed class LinuxCaptureTests : IAsyncLifetime
     private readonly string directory = Directory.CreateTempSubdirectory("pn-linux-").FullName;
     private readonly string? previousHookLog = Environment.GetEnvironmentVariable("PROXYNATOR_HOOK_LOG");
     private HttpTarget target = null!;
+    private FakeLdapServer ldap = null!;
     private FakeProxyServer proxy = null!;
 
     private string HookLog => Path.Combine(directory, "hook.log");
@@ -28,9 +29,12 @@ public sealed class LinuxCaptureTests : IAsyncLifetime
     public ValueTask InitializeAsync()
     {
         target = new HttpTarget();
+        ldap = new FakeLdapServer();
         proxy = new FakeProxyServer(FakeProxyKind.Socks5)
         {
-            Resolve = request => request.Address is { } address ? new IPEndPoint(address, request.Port) : target.Endpoint,
+            // LDAP goes to the fake directory server; everything else to the HTTP target.
+            Resolve = request => request.Port == 389 ? ldap.Endpoint
+                : request.Address is { } address ? new IPEndPoint(address, request.Port) : target.Endpoint,
         };
         Environment.SetEnvironmentVariable("PROXYNATOR_HOOK_LOG", HookLog);
         return ValueTask.CompletedTask;
@@ -40,6 +44,7 @@ public sealed class LinuxCaptureTests : IAsyncLifetime
     {
         Environment.SetEnvironmentVariable("PROXYNATOR_HOOK_LOG", previousHookLog);
         await proxy.DisposeAsync();
+        await ldap.DisposeAsync();
         await target.DisposeAsync();
         if (File.Exists(HookLog))
         {
@@ -167,7 +172,38 @@ public sealed class LinuxCaptureTests : IAsyncLifetime
         Assert.Contains(proxy.Requests, r => r.Host == "intranet.proxynator.test");
     }
 
+    /// <summary>
+    /// LDAP to a domain controller behind a pivot: the name only resolves on the far side (remote DNS), the proxy gets
+    /// it, and a real LDAP client (curl with OpenLDAP) completes a bind and a search.
+    /// </summary>
+    [Fact]
+    public async Task Ebpf_ldap_reaches_a_domain_controller_by_name_through_the_proxy()
+    {
+        Requirements.RootLinux();
+        await using var service = await StartAsync("ebpf", """{ "processes": ["curl"] }""", dnsMode: "remote");
+
+        var (exitCode, output, error) = await LdapSearchAsync("dc01.proxynator.test");
+
+        Assert.True(exitCode == 0, $"curl failed ({exitCode}): {output} {error}");
+        Assert.Contains(FakeLdapServer.EntryDn, output, StringComparison.Ordinal);
+        Assert.Contains(proxy.Requests, r => r.Host == "dc01.proxynator.test" && r.Port == 389);
+        Assert.Contains("search", ldap.Operations);
+    }
+
     // ---- preload ---------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Preload_ldap_goes_through_the_proxy()
+    {
+        Requirements.RootLinux();
+        await using var service = await StartAsync("preload", "{}");
+
+        var (exitCode, output, error) = await RunPreloadedAsync(service, "curl", ["-sS", "--max-time", "20", LdapUrl("203.0.113.10")]);
+
+        Assert.True(exitCode == 0, $"curl failed ({exitCode}): {output} {error}");
+        Assert.Contains(FakeLdapServer.EntryDn, output, StringComparison.Ordinal);
+        Assert.Contains(proxy.Requests, r => Equals(r.Address, IPAddress.Parse("203.0.113.10")) && r.Port == 389);
+    }
 
     [Fact]
     public async Task Preload_routes_a_started_program_through_the_proxy()
@@ -221,6 +257,12 @@ public sealed class LinuxCaptureTests : IAsyncLifetime
     }
 
     private static readonly string[] CurlArguments = ["-4", "-sS", "-f", "--max-time", "20", "-o", "/dev/null"];
+
+    /// <summary>A subtree search for everything under dc=corp,dc=local, returning the cn attribute.</summary>
+    private static string LdapUrl(string host) => $"ldap://{host}:389/dc=corp,dc=local?cn?sub?(objectClass=*)";
+
+    private static Task<(int ExitCode, string Output, string Error)> LdapSearchAsync(string host) =>
+        Tool.RunAsync("curl", ["-sS", "--max-time", "20", LdapUrl(host)]);
 
     private static Task<(int ExitCode, string Output, string Error)> CurlAsync(string url, params string[] extra) =>
         Tool.RunAsync("curl", [.. CurlArguments, .. extra, url]);

@@ -27,6 +27,7 @@
     <Compile Include="..\Proxynator.Core.Tests\Support\TestTimeout.cs" Link="Support\TestTimeout.cs" />
     <Compile Include="..\Proxynator.Core.Tests\Support\FakeProxyServer.cs" Link="Support\FakeProxyServer.cs" />
     <Compile Include="..\Proxynator.Core.Tests\Support\Tunnel.cs" Link="Support\Tunnel.cs" />
+    <Compile Include="..\Proxynator.Core.Tests\Support\FakeTcpDnsServer.cs" Link="Support\FakeTcpDnsServer.cs" />
   </ItemGroup>
 
   <ItemGroup>

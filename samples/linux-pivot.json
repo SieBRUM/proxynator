@@ -5,7 +5,13 @@
     // Machine-wide kernel capture; only the processes the rules name are redirected.
     "capture": { "mode": "ebpf" },
     // Internal names get fake addresses (only for the programs below) and are resolved by the pivot.
-    "dns": { "mode": "remote", "remoteDomains": ["corp.local", "*.corp.local"] }
+    "dns": {
+      "mode": "remote",
+      "remoteDomains": ["corp.local", "*.corp.local"],
+      // Domain controller lookups (SRV: _ldap._tcp.dc._msdcs.corp.local, _kerberos._tcp...) go to this DNS server,
+      // through the pivot. Set it to a domain controller's IP.
+      "remoteServer": { "address": "10.0.0.10", "via": "pivot" }
+    }
   },
   "proxies": [
     { "id": "pivot", "type": "socks5", "host": "127.0.0.1", "port": 1080 },

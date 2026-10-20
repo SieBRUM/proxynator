@@ -36,6 +36,7 @@ public sealed partial class UdpRelayServer : IAsyncDisposable
     private readonly FakeIpPool? fakeIps;
     private readonly IHostResolver resolver;
     private readonly ITcpConnector connector;
+    private readonly RemoteDnsClient remoteDns;
     private readonly TimeProvider time;
     private readonly ConcurrentDictionary<IPEndPoint, UdpSession> sessions = new();
     private readonly CancellationTokenSource shutdown = new();
@@ -63,6 +64,7 @@ public sealed partial class UdpRelayServer : IAsyncDisposable
         this.fakeIps = fakeIps;
         this.resolver = resolver ?? SystemHostResolver.Instance;
         this.connector = connector ?? TcpConnector.Default;
+        remoteDns = new RemoteDnsClient(new ProxyRouteDialer(this.connector), logger);
         time = timeProvider ?? TimeProvider.System;
     }
 
@@ -386,10 +388,18 @@ public sealed partial class UdpRelayServer : IAsyncDisposable
             var responder = new FakeDnsResponder(relay.fakeIps!);
             await foreach (var query in inbound.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
-                var answer = responder.TryAnswer(query, relay.configuration.Current.ShouldFakeResolve);
+                var active = relay.configuration.Current;
+                var answer = responder.TryAnswer(query, active.ShouldFakeResolve);
                 if (answer is not null)
                 {
                     await ReplyAsync(answer, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (RemoteDnsClient.Handles(active, query))
+                {
+                    // SRV and other non-address lookups of remote domains: ask the DNS server behind the proxy.
+                    _ = AnswerRemotelyAsync(active, query, cancellationToken);
                     continue;
                 }
 
@@ -401,6 +411,18 @@ public sealed partial class UdpRelayServer : IAsyncDisposable
                 }
 
                 await direct.SendAsync(query, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        private async Task AnswerRemotelyAsync(ActiveConfiguration active, ReadOnlyMemory<byte> query, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await ReplyAsync(await relay.remoteDns.QueryAsync(active, query, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or SocketException)
+            {
+                // Session closed.
             }
         }
 

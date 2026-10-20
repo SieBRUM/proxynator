@@ -156,4 +156,19 @@ public class ConfigValidatorTests
         Assert.Equal(2, active.ProxyEndpoints.Count);
         Assert.Contains(active.ProxyEndpoints, e => e.Host == "proxy.example" && e.Port == 8080);
     }
+
+    [Fact]
+    public void A_remote_dns_server_needs_an_address_a_port_and_a_known_route()
+    {
+        static ProxynatorConfig With(RemoteDnsServer server) => Configs.Minimal() with
+        {
+            Settings = new ProxynatorSettings { Dns = new DnsSettings { RemoteServer = server } },
+            Proxies = [Configs.Proxy("pivot", ProxyType.Socks5, 1080)],
+        };
+
+        Assert.Empty(ErrorPaths(With(new RemoteDnsServer { Address = "10.0.0.10", Via = "pivot" })));
+        Assert.Equal(
+            ["$.settings.dns.remoteServer.address", "$.settings.dns.remoteServer.port", "$.settings.dns.remoteServer.via"],
+            ErrorPaths(With(new RemoteDnsServer { Address = "dc01.corp.local", Port = 0, Via = "nope" })));
+    }
 }

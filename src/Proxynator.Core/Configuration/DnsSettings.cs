@@ -18,6 +18,12 @@ public sealed record DnsSettings
     /// </summary>
     public IReadOnlyList<string> RemoteDomains { get; set; } = ["*"];
 
+    /// <summary>
+    /// Where queries for <see cref="RemoteDomains"/> that are not answered with fake addresses go (through a proxy),
+    /// e.g. the SRV lookups that locate domain controllers. Without it they go to the local DNS servers.
+    /// </summary>
+    public RemoteDnsServer? RemoteServer { get; set; }
+
     /// <summary>How long to wait for the client's first bytes when sniffing a hostname.</summary>
     public int SniffTimeoutMs { get; set; } = 250;
 }

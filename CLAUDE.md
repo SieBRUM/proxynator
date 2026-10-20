@@ -132,7 +132,10 @@ The user chooses the capture mode in config (`settings.capture.mode`).
   relay** (relay-first), which classifies them on the spot: nothing can slip past before the service knows a process.
 - UDP: `connect4/6` + `sendmsg4/6` block (EPERM) or pass per the process flags; no UDP relaying. Remote DNS: UDP/53 of
   candidates (also to the 127.0.0.53 stub) goes to `DnsForwarder` (Core), `recvmsg4/6` rewrites the reply source
-  back to the server the program asked. So remote DNS is per process here.
+  back to the server the program asked. So remote DNS is per process here. Two safety nets (config `flags`,
+  `fake_network`/`fake_mask`): in remote mode, DNS of *unclassified* processes goes to the forwarder too (a freshly
+  exec'd tool's first lookup can beat its classification), and TCP to the fake range always goes to the relay, even
+  from ignored processes (a fake address only means something to the relay).
 - Always excluded: the service's tgid, loopback/unspecified destinations, configured proxy endpoints (`excluded`
   map, refreshed on config change).
 
@@ -163,6 +166,11 @@ Proxy hostnames, single-label names, `*.localhost` and reverse lookups are never
 Connections to fake addresses always go to the relays, which use the hostname: proxies get it, direct connections
 resolve it with `ModeAwareResolver`, which queries the upstream DNS servers directly (`UpstreamDnsResolver`) while
 remote mode is on — the system resolver would return Proxynator's own fake answers.
+
+`settings.dns.remoteServer` (`{ address, port, via }`): in remote mode, queries for remote domains that the fake
+responder does not answer (SRV, TXT, MX, ...: domain controller discovery) go to that DNS server as DNS over TCP
+through the `via` route (`RemoteDnsClient`, used by the UDP relay's DNS sessions and by `DnsForwarder`). Failure →
+SERVFAIL, never the local DNS. A/AAAA stay fake.
 
 Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost.exe`), not by the app, so per-process attribution of DNS packets is impossible in `windivert` mode. `remote` mode in `windivert` is therefore applied system-wide for the listed domains (relay sends non-proxied fake-IP connections direct after real resolution). That includes the service's own process and in-process tests: resolve real addresses before turning remote mode on. In `injection`, `preload` and `ebpf` modes it is per-process (resolver hooks, or the eBPF DNS redirect of candidate processes). Apps using their own DoH just look like ordinary TCP/443 flows and are handled by the rules.
 
@@ -362,6 +370,9 @@ Windows (WinDivert, Win32) is only exercised by CI's Windows job; check it after
   proxied and direct), nslookup.exe (UDP through SOCKS5) and a venv's pip.exe (pipx-style launcher chain); for
   injection: 64/32-bit curl, cmd.exe children across bitness, fail-closed without service, per-process remote DNS,
   pwsh (.NET ConnectEx), pip, attach to 64-bit python and 32-bit Windows PowerShell. The hook log is printed.
+- LDAP tests use curl's `ldap://` (WinLDAP / OpenLDAP) against `FakeLdapServer`, reached through the fake proxy at a
+  TEST-NET address (203.0.113.10) that only exists for the proxy's `Resolve`, so no internet is needed; SRV tests use
+  `FakeTcpDnsServer` as the domain controller's DNS (`nslookup -type=SRV`).
 - Integration tests never run in parallel (`DisableTestParallelization`): capture affects the machine or the started
   processes.
 - `cmd.exe` does not parse its command line like the C runtime: build `cmd /d /s /c "..."` lines by hand, don't

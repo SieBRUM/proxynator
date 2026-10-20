@@ -24,6 +24,7 @@ public sealed class InjectionCaptureTests : IAsyncLifetime
 
     private readonly string directory = Directory.CreateTempSubdirectory("pn-inj-").FullName;
     private readonly string? previousHookLog = Environment.GetEnvironmentVariable("PROXYNATOR_HOOK_LOG");
+    private readonly FakeLdapServer ldap = new();
     private FakeProxyServer proxy = null!;
     private IPAddress targetAddress = null!;
 
@@ -35,7 +36,7 @@ public sealed class InjectionCaptureTests : IAsyncLifetime
         proxy = new FakeProxyServer(FakeProxyKind.Socks5)
         {
             // Names only the proxy can resolve (remote DNS) go to the target as well.
-            Resolve = request => new IPEndPoint(
+            Resolve = request => request.Port == 389 ? ldap.Endpoint : new IPEndPoint(
                 request.Address ?? (request.Host is Target or InternalName
                     ? targetAddress
                     : System.Net.Dns.GetHostAddresses(request.Host!).First(a => a.AddressFamily == AddressFamily.InterNetwork)),
@@ -50,6 +51,7 @@ public sealed class InjectionCaptureTests : IAsyncLifetime
     {
         Environment.SetEnvironmentVariable("PROXYNATOR_HOOK_LOG", previousHookLog);
         await proxy.DisposeAsync();
+        await ldap.DisposeAsync();
         if (File.Exists(HookLog))
         {
             Console.WriteLine("Hook log:");
@@ -149,6 +151,20 @@ public sealed class InjectionCaptureTests : IAsyncLifetime
         // Unlike the windivert mode, the rest of the machine (here: the test process) still gets real answers.
         var addresses = await System.Net.Dns.GetHostAddressesAsync(Target);
         Assert.DoesNotContain(addresses, a => a.ToString().StartsWith("198.18.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Ldap_from_a_hooked_program_goes_through_the_proxy()
+    {
+        Requirements.ElevatedWindowsWithHooks();
+        await using var service = await StartAsync(ProxyAllConfig());
+
+        // curl.exe's ldap:// uses WinLDAP (wldap32), so this is Windows' own LDAP client inside the hooked process.
+        var exitCode = await RunHookedAsync(service, Path.Combine(System32, "curl.exe"), ["-sS", "--max-time", "20", "-o", Path.Combine(directory, "ldap.txt"), "ldap://203.0.113.10:389/dc=corp,dc=local?cn?sub?(objectClass=*)"]);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(FakeLdapServer.EntryDn, await File.ReadAllTextAsync(Path.Combine(directory, "ldap.txt")), StringComparison.Ordinal);
+        Assert.Contains(proxy.Requests, r => Equals(r.Address, IPAddress.Parse("203.0.113.10")) && r.Port == 389);
     }
 
     [Fact]

@@ -48,6 +48,8 @@ doesn't matter what it thinks of proxy settings.
   | **Windows** | `windivert`: the signed WinDivert driver | `injection`: a hook DLL via `proxynator run` / `attach` |
   | **Linux** | `ebpf`: eBPF programs on the root cgroup | `preload`: an `LD_PRELOAD` library via `proxynator run` |
 
+- ✅ **LDAP and Active Directory:** LDAP, LDAPS and the global catalog through any mode, with domain controller
+  discovery (DNS SRV) forwarded to a DNS server behind your pivot. See [LDAP and Active Directory](#ldap-and-active-directory).
 - ✅ **Configurable DNS:**
   - `sniff` (default): recover hostnames from TLS SNI or the HTTP `Host` header.
   - `local`: send the IP address the app resolved.
@@ -302,6 +304,31 @@ Tips per tool:
 - **roadtools** speak HTTPS to Entra ID and Graph, which works great through Burp. Python checks TLS against its own CA
   bundle (certifi), not the system store: point `REQUESTS_CA_BUNDLE` at a PEM file containing Burp's CA. `roadtx`
   interactive logins start a browser through chromedriver; `includeChildren` routes that browser too.
+
+### LDAP and Active Directory
+
+LDAP is ordinary TCP to the Proxynator, so it works in every capture mode: `ldap://` (389), `ldaps://` (636) and
+the global catalog (3268/3269), whether it comes from NetExec's `ldap` module, BloodHound collectors, `ldapsearch`,
+PowerView or Windows' own LDAP client. CI runs real LDAP clients through all four modes (curl's `ldap://`, which
+uses WinLDAP on Windows and OpenLDAP on Linux) to a stand-in domain controller behind a SOCKS proxy.
+
+The part that usually breaks AD tooling through a pivot is **DNS**: Kerberos wants hostnames (`dc01.corp.local`),
+and tools find domain controllers with SRV lookups (`_ldap._tcp.dc._msdcs.corp.local`) that your local DNS has never
+heard of. Remote DNS fixes both:
+
+```json
+"dns": {
+  "mode": "remote",
+  "remoteDomains": ["corp.local", "*.corp.local"],
+  "remoteServer": { "address": "10.0.0.10", "via": "pivot" }
+}
+```
+
+Names under `corp.local` get fake addresses, so the proxy receives (and resolves) the real hostname. Other lookups
+for those names, such as SRV, TXT and MX, go to `remoteServer` (a domain controller is fine) as DNS over TCP
+through the `pivot` proxy. If it can't be reached, the program gets a DNS failure, never an answer from your local
+DNS. SRV forwarding works where the Proxynator sees DNS packets: `windivert`, `ebpf`, and tools that query a DNS
+server themselves. Tools that take `--dns-tcp` / `-ns <dc ip>` work in every mode, because that is plain TCP.
 
 Ready-made configs: [`samples/netexec-socks-pivot.json`](samples/netexec-socks-pivot.json),
 [`samples/roadtools-burp.json`](samples/roadtools-burp.json), [`samples/injection-run.json`](samples/injection-run.json)

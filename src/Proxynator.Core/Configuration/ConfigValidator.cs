@@ -20,6 +20,7 @@ public static class ConfigValidator
         var proxyIds = ValidateProxies(config.Proxies, errors);
         var targetIds = ValidateChains(config.Chains, proxyIds, errors);
         ValidateRules(config.Rules, targetIds, errors);
+        ValidateRemoteDnsServer(config.Settings.Dns.RemoteServer, targetIds, errors);
         return errors;
     }
 
@@ -44,6 +45,30 @@ public static class ConfigValidator
         if (settings.Relay.ConnectTimeoutMs is < 100 or > 300_000)
         {
             errors.Add(new("$.settings.relay.connectTimeoutMs", "Must be between 100 and 300000."));
+        }
+    }
+
+    private static void ValidateRemoteDnsServer(RemoteDnsServer? server, HashSet<string> targetIds, List<ConfigError> errors)
+    {
+        if (server is null)
+        {
+            return;
+        }
+
+        const string path = "$.settings.dns.remoteServer";
+        if (!System.Net.IPAddress.TryParse(server.Address, out _))
+        {
+            errors.Add(new($"{path}.address", $"'{server.Address}' is not an IP address (the server must be reachable without DNS)."));
+        }
+
+        if (server.Port is < 1 or > 65535)
+        {
+            errors.Add(new($"{path}.port", "Must be between 1 and 65535."));
+        }
+
+        if (!targetIds.Contains(server.Via))
+        {
+            errors.Add(new($"{path}.via", $"Unknown proxy or chain '{server.Via}'."));
         }
     }
 

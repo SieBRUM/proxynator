@@ -76,6 +76,32 @@
                 "*"
               ],
               "description": "Names answered with fake addresses in remote mode (wildcards, e.g. *.corp.local). Proxy hostnames, single-label names and reverse lookups are never faked."
+            },
+            "remoteServer": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "address",
+                "via"
+              ],
+              "description": "A DNS server inside the target network, reached through a proxy (DNS over TCP). In remote mode, queries for remoteDomains that are not answered with fake addresses (SRV, TXT, ...; e.g. domain controller lookups) go there.",
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "description": "IP address of the server, e.g. a domain controller."
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535,
+                  "default": 53
+                },
+                "via": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Proxy or chain id to reach the server through."
+                }
+              }
             }
           }
         },

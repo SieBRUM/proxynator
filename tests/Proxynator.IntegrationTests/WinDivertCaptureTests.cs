@@ -14,6 +14,11 @@ public sealed class WinDivertCaptureTests : IAsyncLifetime
     private const string Target = "example.com";
 
     private readonly string directory = Directory.CreateTempSubdirectory("pn-it-").FullName;
+    private const string LdapAddress = "203.0.113.10";
+    private const string LdapUrl = $"ldap://{LdapAddress}:389/dc=corp,dc=local?cn?sub?(objectClass=*)";
+
+    private readonly FakeLdapServer ldap = new();
+    private readonly FakeTcpDnsServer domainDns = new();
     private FakeProxyServer proxy = null!;
     private IPAddress targetAddress = null!;
 
@@ -25,7 +30,8 @@ public sealed class WinDivertCaptureTests : IAsyncLifetime
         // A real SOCKS5 proxy (TCP and UDP) that resolves hostnames itself, like a remote proxy would.
         proxy = new FakeProxyServer(FakeProxyKind.Socks5)
         {
-            Resolve = request => new IPEndPoint(
+            // LDAP and DNS go to the stand-in domain controller (TEST-NET addresses, unreachable for real).
+            Resolve = request => request.Port == 389 ? ldap.Endpoint : request.Port == 53 && request.Udp is false ? domainDns.Endpoint : new IPEndPoint(
                 request.Address ?? (request.Host == Target
                     ? targetAddress
                     : System.Net.Dns.GetHostAddresses(request.Host!).First(a => a.AddressFamily == AddressFamily.InterNetwork)),
@@ -36,6 +42,8 @@ public sealed class WinDivertCaptureTests : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         await proxy.DisposeAsync();
+        await ldap.DisposeAsync();
+        await domainDns.DisposeAsync();
         Directory.Delete(directory, recursive: true);
     }
 
@@ -157,6 +165,36 @@ public sealed class WinDivertCaptureTests : IAsyncLifetime
         Assert.Empty(proxy.Requests);
     }
 
+    /// <summary>LDAP from Windows' own LDAP client (curl.exe uses WinLDAP) to a "domain controller" behind the proxy.</summary>
+    [Fact]
+    public async Task Ldap_from_curl_goes_through_the_proxy()
+    {
+        Requirements.ElevatedWindows();
+        await using var service = await StartAsync(RuleFor("curl.exe", """{ "type": "proxy", "target": "socks" }"""));
+
+        var (exitCode, output, error) = await Tool.RunAsync(Path.Combine(Environment.SystemDirectory, "curl.exe"), ["-sS", "--max-time", "20", LdapUrl]);
+
+        Assert.True(exitCode == 0, $"curl failed ({exitCode}): {output} {error}");
+        Assert.Contains(FakeLdapServer.EntryDn, output, StringComparison.Ordinal);
+        Assert.Contains(proxy.Requests, r => Equals(r.Address, IPAddress.Parse(LdapAddress)) && r.Port == 389);
+    }
+
+    /// <summary>Finding domain controllers (DNS SRV) through the pivot: the query goes to the DNS server behind the proxy.</summary>
+    [Fact]
+    public async Task Srv_lookups_for_domain_controllers_go_to_the_dns_server_behind_the_proxy()
+    {
+        Requirements.ElevatedWindows();
+        await using var service = await StartAsync(RuleFor(
+            "nslookup.exe", """{ "type": "proxy", "target": "socks" }""", dnsMode: "remote", remoteDomains: """ "corp.local", "*.corp.local" """,
+            remoteServer: """{ "address": "203.0.113.53", "via": "socks" }"""));
+
+        var (_, output, error) = await Tool.RunAsync(Path.Combine(Environment.SystemDirectory, "nslookup.exe"), ["-type=SRV", "_ldap._tcp.dc._msdcs.corp.local", "8.8.8.8"]);
+
+        Assert.True(output.Contains(domainDns.SrvTarget, StringComparison.OrdinalIgnoreCase), $"nslookup did not get the SRV record: {output} {error}");
+        Assert.Contains("_ldap._tcp.dc._msdcs.corp.local", domainDns.Queries);
+        Assert.Contains(proxy.Requests, r => Equals(r.Address, IPAddress.Parse("203.0.113.53")) && r.Port == 53);
+    }
+
     /// <summary>
     /// The pipx situation: a console-script launcher (pip.exe, like nxc.exe or roadrecon.exe) starts the venv's
     /// python.exe, which starts the base interpreter that actually opens the connections. Matching the launcher with
@@ -179,12 +217,13 @@ public sealed class WinDivertCaptureTests : IAsyncLifetime
         Assert.Contains(proxy.Requests, r => r.Host is "pypi.org" or "files.pythonhosted.org" && r.Port == 443);
     }
 
-    private string RuleFor(string process, string action, string dnsMode = "sniff", bool includeChildren = false) => $$"""
+    private string RuleFor(
+        string process, string action, string dnsMode = "sniff", bool includeChildren = false, string? remoteDomains = null, string remoteServer = "null") => $$"""
         {
           "version": 1,
           "settings": {
             "capture": { "mode": "windivert" },
-            "dns": { "mode": "{{dnsMode}}", "remoteDomains": ["{{Target}}"] }
+            "dns": { "mode": "{{dnsMode}}", "remoteDomains": [{{remoteDomains ?? $"\"{Target}\""}}], "remoteServer": {{remoteServer}} }
           },
           "proxies": [
             { "id": "socks", "type": "socks5", "host": "127.0.0.1", "port": {{proxy.Endpoint.Port}} },

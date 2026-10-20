@@ -9,7 +9,8 @@ namespace Proxynator.Core.NameResolution;
 /// A local DNS server for captured programs in <see cref="DnsMode.Remote"/>: names in <c>remoteDomains</c> get fake
 /// answers from the <see cref="FakeIpPool"/>, everything else is forwarded to the service's own DNS servers. Used
 /// by backends that can redirect the DNS queries of chosen processes only (Linux eBPF), which makes remote DNS
-/// per process instead of machine-wide.
+/// per process instead of machine-wide. Other lookups of remote domains (SRV, ...) go to
+/// <see cref="DnsSettings.RemoteServer"/> through its proxy when one is configured.
 /// </summary>
 public sealed partial class DnsForwarder : IAsyncDisposable
 {
@@ -20,17 +21,24 @@ public sealed partial class DnsForwarder : IAsyncDisposable
     private readonly FakeDnsResponder responder;
     private readonly IReadOnlyList<IPEndPoint> upstream;
     private readonly ILogger logger;
+    private readonly RemoteDnsClient remoteDns;
     private readonly CancellationTokenSource shutdown = new();
     private readonly List<Socket> listeners = [];
     private readonly List<Task> loops = [];
 
     /// <summary>Creates the forwarder.</summary>
-    public DnsForwarder(ConfigurationStore configuration, FakeIpPool fakeIps, IReadOnlyList<IPEndPoint> upstream, ILogger logger)
+    /// <param name="configuration">The configuration store (DNS mode, remote domains, remote server).</param>
+    /// <param name="fakeIps">The fake-IP pool.</param>
+    /// <param name="upstream">The service's own DNS servers, for names that are not faked.</param>
+    /// <param name="logger">Logger.</param>
+    /// <param name="connector">Opens connections to proxies, for <see cref="DnsSettings.RemoteServer"/>.</param>
+    public DnsForwarder(ConfigurationStore configuration, FakeIpPool fakeIps, IReadOnlyList<IPEndPoint> upstream, ILogger logger, Net.ITcpConnector? connector = null)
     {
         this.configuration = configuration;
         responder = new FakeDnsResponder(fakeIps);
         this.upstream = upstream;
         this.logger = logger;
+        remoteDns = new RemoteDnsClient(new Proxies.ProxyRouteDialer(connector ?? Net.TcpConnector.Default), logger);
     }
 
     /// <summary>The bound endpoints (actual ports).</summary>
@@ -106,7 +114,9 @@ public sealed partial class DnsForwarder : IAsyncDisposable
                 continue;
             }
 
-            _ = ForwardAsync(listener, query, client, cancellationToken);
+            _ = active.Settings.Dns.Mode == DnsMode.Remote && RemoteDnsClient.Handles(active, query)
+                ? AnswerRemotelyAsync(listener, active, query, client, cancellationToken)
+                : ForwardAsync(listener, query, client, cancellationToken);
         }
     }
 
@@ -137,6 +147,12 @@ public sealed partial class DnsForwarder : IAsyncDisposable
         }
 
         Log.ForwardFailed(logger, upstream.Count);
+    }
+
+    private async Task AnswerRemotelyAsync(Socket listener, ActiveConfiguration active, byte[] query, IPEndPoint client, CancellationToken cancellationToken)
+    {
+        var answer = await remoteDns.QueryAsync(active, query, cancellationToken).ConfigureAwait(false);
+        await ReplyAsync(listener, answer, client, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task ReplyAsync(Socket listener, ReadOnlyMemory<byte> answer, IPEndPoint client, CancellationToken cancellationToken)

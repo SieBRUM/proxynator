@@ -40,7 +40,12 @@ struct config {
     __u16 relay6_port;
     __u16 dns4_port;
     __u16 dns6_port;
+    __u32 fake_network; // the fake-IP range (network byte order); connections to it always go to the relay
+    __u32 fake_mask;
+    __u32 flags;
 };
+
+#define CONFIG_DNS_REDIRECT_UNKNOWN 1 // remote DNS: DNS of processes not classified yet goes to the forwarder too
 
 // Addresses are stored as IPv6; IPv4 as ::ffff:a.b.c.d.
 struct origin {
@@ -142,6 +147,11 @@ static __always_inline int is_excluded(const struct origin *o)
     return bpf_map_lookup_elem(&excluded, &key) != 0;
 }
 
+static __always_inline int is_fake(const struct config *cfg, const __u32 *addr)
+{
+    return cfg->fake_mask && is_v4_mapped(addr) && (addr[3] & cfg->fake_mask) == cfg->fake_network;
+}
+
 static __always_inline __u32 decision_of(__u32 tgid)
 {
     __u32 *d = bpf_map_lookup_elem(&decisions, &tgid);
@@ -154,7 +164,8 @@ static __always_inline int redirect_tcp(void *ctx, const struct config *cfg, str
     if (o->tgid == cfg->service_tgid || is_local_or_unspecified(o->addr) || is_excluded(o)) {
         return 0;
     }
-    if (decision_of(o->tgid) & DECISION_IGNORE) {
+    // A fake address (remote DNS) only means something to the relay, whoever connects to it.
+    if ((decision_of(o->tgid) & DECISION_IGNORE) && !is_fake(cfg, o->addr)) {
         return 0;
     }
     __u64 cookie = bpf_get_socket_cookie(ctx);
@@ -172,10 +183,14 @@ static __always_inline int udp_action(const struct config *cfg, const struct ori
         return UDP_PASS;
     }
     __u32 decision = decision_of(o->tgid);
+    __u16 port = bpf_ntohs(o->port);
+    if (decision == 0 && port == 53 && (cfg->flags & CONFIG_DNS_REDIRECT_UNKNOWN)) {
+        // Not classified yet (just started): its first lookups must not miss the fake-IP DNS.
+        return UDP_DNS;
+    }
     if (!(decision & DECISION_TARGET)) {
         return UDP_PASS;
     }
-    __u16 port = bpf_ntohs(o->port);
     if (port == 53 && (decision & DECISION_DNS_REDIRECT)) {
         return UDP_DNS;
     }

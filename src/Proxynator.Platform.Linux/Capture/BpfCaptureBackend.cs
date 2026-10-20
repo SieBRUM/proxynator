@@ -28,6 +28,7 @@ namespace Proxynator.Platform.Linux.Capture;
 public sealed partial class BpfCaptureBackend : ICaptureBackend, IOriginalDestinationSource
 {
     private const ushort AfInet = 2;
+    private const uint ConfigDnsRedirectUnknown = 1;
 
     private static readonly string[] CgroupPrograms =
     [
@@ -295,7 +296,15 @@ public sealed partial class BpfCaptureBackend : ICaptureBackend, IOriginalDestin
             Relay6Port = PortOf(context.RelayEndpoints, AddressFamily.InterNetworkV6),
             Dns4Port = PortOf(dns, AddressFamily.InterNetwork),
             Dns6Port = PortOf(dns, AddressFamily.InterNetworkV6),
+            Flags = context.Configuration.Current.Settings.Dns.Mode == DnsMode.Remote ? ConfigDnsRedirectUnknown : 0,
         };
+        if (context.FakeIps?.Range is { AddressFamily: AddressFamily.InterNetwork } fake)
+        {
+            // Both in network byte order, as the program compares the raw address bytes.
+            config.FakeNetwork = BitConverter.ToUInt32(fake.NetworkAddress.GetAddressBytes());
+            config.FakeMask = BinaryPrimitives.ReverseEndianness(fake.PrefixLength == 0 ? 0u : uint.MaxValue << (32 - fake.PrefixLength));
+        }
+
         if (config.Relay4Port == 0)
         {
             throw new InvalidOperationException("The relay does not listen on 127.0.0.1.");
@@ -362,6 +371,7 @@ public sealed partial class BpfCaptureBackend : ICaptureBackend, IOriginalDestin
         try
         {
             await RefreshExclusionsAsync(configuration, CancellationToken.None).ConfigureAwait(false);
+            WriteConfig(context!);
             ClassifyRunningProcesses();
         }
 #pragma warning disable CA1031 // Background refresh: log, keep capturing with the previous classification.
@@ -409,6 +419,9 @@ public sealed partial class BpfCaptureBackend : ICaptureBackend, IOriginalDestin
         public ushort Relay6Port;
         public ushort Dns4Port;
         public ushort Dns6Port;
+        public uint FakeNetwork;
+        public uint FakeMask;
+        public uint Flags;
     }
 
     [StructLayout(LayoutKind.Sequential)]
