@@ -109,7 +109,11 @@ Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost
 - JSON, camelCase, with a top-level `"version"` field. Migrations live in Core and upgrade older versions on load. Ship a JSON schema in `schema/`.
 - Default locations: `%ProgramData%\Proxynator\config.json` (Windows), `/etc/proxynator/config.json` (Linux). Overridable with `--config`.
 - Load = parse → migrate → validate → **atomic swap**. Invalid config is rejected entirely; the running config stays active.
-- Use `System.Text.Json` source generation (trim/AOT friendly).
+- Use `System.Text.Json` source generation (trim/AOT friendly). Strict parsing: unknown properties, `null` for
+  non-nullable properties and missing `required` properties are errors; comments and trailing commas are allowed.
+- **Gotcha:** config records use `required ... { get; init; }` for mandatory values and `{ get; set; }` for optional
+  values with defaults. The source generator overwrites the initializers of *init-only* properties that are missing
+  from the JSON with `default`, so optional properties must not be `init`.
 
 ### IPC
 
@@ -121,10 +125,16 @@ Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost
 
 ```
 src/
-  Proxynator.Core/                 Config, migrations, validation, RuleEngine, proxy clients,
-                                   chain dialer, Relay, DNS (sniff/fake-IP), connection tracking,
-                                   platform abstractions (ICaptureBackend, IProcessInfoProvider,
-                                   IPrivilegeChecker, IOriginalDestinationTable, ...)
+  Proxynator.Core/                 Platform-agnostic core, by namespace:
+    Configuration/                   config model, loader (parse -> migrate -> validate), JSON source-gen
+                                     context, ConfigValidator, ActiveConfiguration, ConfigurationStore
+    Net/                             TargetEndpoint, AddressRange (CIDR), PortRange, ITcpConnector
+    Rules/                           RuleEngine (Evaluate, RequiresRelay), compiled rules, wildcard matching
+    Processes/                       ProcessInfo, IProcessInfoProvider
+    Proxies/                         SOCKS4/4a, SOCKS5, HTTP CONNECT clients, ProxyRouteDialer (chains)
+    Sniffing/                        HostnameSniffer (TLS SNI, HTTP Host)
+    Relay/                           RelayServer, IOriginalDestinationTable, ConnectionTracker
+    Platform/                        ICaptureBackend, CaptureContext, IPrivilegeChecker
   Proxynator.Platform.Windows/     WinDivert P/Invoke + capture, injection controller,
                                    process tracking, admin check, Windows service glue
   Proxynator.Platform.Linux/       (later) eBPF/nftables capture, preload controller, root check
@@ -140,7 +150,8 @@ tests/
   Proxynator.Core.Tests/           Pure unit tests, run on both OSes
   Proxynator.Platform.Windows.Tests/
   Proxynator.IntegrationTests/     Need admin/root; tagged [Trait("Category","Integration")]
-schema/                            config JSON schema
+schema/                            config JSON schema (keep in sync with the config model)
+samples/                           example configs (loaded by the tests, so they must stay valid)
 docs/                              design notes, ADRs (docs/adr/NNNN-title.md)
 .github/workflows/                 CI
 ```
@@ -154,28 +165,42 @@ docs/                              design notes, ADRs (docs/adr/NNNN-title.md)
 - File-scoped namespaces, one public type per file, `async` all the way, `CancellationToken` on every async API, `System.IO.Pipelines`/`Socket` APIs on the hot path, avoid per-packet allocations (`ArrayPool`, `Span<T>`).
 - Logging via `Microsoft.Extensions.Logging` (Event Log/file on Windows, journald on Linux). Use structured logging; never log proxy credentials.
 - Native code: C++17, CMake, built in CI. Third-party binaries (WinDivert) are downloaded at build time with a pinned version and verified SHA-256, not committed.
-- Tests: xUnit. Every proxy protocol client is tested against an in-process fake proxy server. The rule engine and config migration get table-driven tests.
+- Tests: xUnit v3 (`using Xunit` is global). Every proxy protocol client is tested against the in-process fake
+  proxy servers in `tests/Proxynator.Core.Tests/Support` (real SOCKS4/4a/5 and HTTP CONNECT servers on loopback).
+  Network tests take a `TestTimeout.Token()` so they can never hang. The rule engine, validator and sniffer get
+  table-driven tests. Relay tests simulate a capture backend: bind the client socket, register it in the
+  `OriginalDestinationTable`, connect to the relay.
 - Architecture decisions that change any of the above get an ADR in `docs/adr/`.
 - Commits: imperative mood, focused. Keep `README.md` and this file up to date when behaviour or layout changes.
 
 ## Build, test, run
 
-> The solution does not exist yet. Update these commands when it lands.
+Requires the .NET 10 SDK (`global.json` pins the 10.0 feature band, rolling forward).
 
 ```
 dotnet build Proxynator.sln -c Release
 dotnet test Proxynator.sln --filter "Category!=Integration"
-dotnet test Proxynator.sln --filter "Category=Integration"   # elevated shell / root only
+dotnet test Proxynator.sln --filter "Category=Integration"   # elevated shell / root only (none yet)
+```
+
+Phase 2 adds:
+
+```
 dotnet run --project src/Proxynator.Service -- --console --config ./samples/config.json
 dotnet run --project src/Proxynator.Cli -- status
 ```
 
-CI (GitHub Actions) builds and unit-tests on `windows-latest` and `ubuntu-latest`, builds the native hook DLL (x64 + x86) on Windows, and runs integration tests on Windows runners (which run as Administrator).
+CI (`.github/workflows/ci.yml`) builds and unit-tests in Release on `windows-latest` and `ubuntu-latest`. Later
+phases add the native hook DLL build (x64 + x86) and integration tests on Windows runners (which run as
+Administrator).
+
+Before pushing: build with zero warnings (warnings are errors) and run the unit tests. Network tests run in
+parallel, so run the suite a few times when touching the relay or proxy code to catch races.
 
 ## Roadmap
 
 - [x] Phase 0 — `README.md`, `CLAUDE.md`, license.
-- [ ] Phase 1 — Solution scaffold, CI, Core: config model + schema + validation, rule engine, SOCKS4/4a/5 + HTTP CONNECT clients with auth, chain dialer, relay, `OriginalDestinationTable`. Fully unit-tested on both OSes.
+- [x] Phase 1 — Solution scaffold, CI, Core: config model + schema + validation, rule engine, SOCKS4/4a/5 + HTTP CONNECT clients with auth, chain dialer, relay with hostname sniffing, `OriginalDestinationTable`. Fully unit-tested on both OSes.
 - [ ] Phase 2 — Windows `windivert` TCP capture, PID attribution, exclusions, privilege check, `proxynatord` (console + Windows service), gRPC IPC, basic CLI (`status`, `config load|validate`, `rules list`, `connections`, `doctor`).
 - [ ] Phase 3 — DNS modes (`sniff`, `remote`), UDP via SOCKS5, QUIC blocking, child-process matching.
 - [ ] Phase 4 — Windows `injection` mode (Detours hook DLL x64/x86, `run`, `attach`, child propagation).

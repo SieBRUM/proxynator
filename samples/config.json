@@ -1,0 +1,40 @@
+{
+  "$schema": "../schema/config.schema.json",
+  "version": 1,
+  "settings": {
+    "capture": { "mode": "windivert", "proxyLoopback": false },
+    "dns": { "mode": "sniff", "fakeIpRange": "198.18.0.0/15" },
+    "udp": { "blockQuic": true }
+  },
+  "proxies": [
+    { "id": "socks-local", "type": "socks5", "host": "127.0.0.1", "port": 5000 },
+    { "id": "burp", "type": "http", "host": "127.0.0.1", "port": 8080 },
+    { "id": "pivot", "type": "socks5", "host": "10.0.0.5", "port": 1080,
+      "auth": { "username": "user", "password": "pass" } }
+  ],
+  "chains": [
+    { "id": "pivot-then-burp", "hops": ["pivot", "burp"] }
+  ],
+  "rules": [
+    {
+      "name": "test via SOCKS5",
+      "match": { "processes": ["test.exe"], "includeChildren": true },
+      "action": { "type": "proxy", "target": "socks-local" }
+    },
+    {
+      "name": "test3 web traffic via Burp",
+      "match": { "processes": ["test3.exe"], "ports": ["80", "443"] },
+      "action": { "type": "proxy", "target": "burp", "udp": "block" }
+    },
+    {
+      "name": "curl via chain",
+      "match": { "processes": ["C:\\Tools\\curl.exe"] },
+      "action": { "type": "proxy", "target": "pivot-then-burp" }
+    },
+    {
+      "name": "default",
+      "match": {},
+      "action": { "type": "direct" }
+    }
+  ]
+}

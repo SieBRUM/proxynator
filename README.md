@@ -4,7 +4,9 @@
 
 Proxynator is an open-source, rule-based traffic redirector for Windows (and, later, Linux). It captures the outbound connections of the applications you choose and sends them through SOCKS4, SOCKS4a, SOCKS5 or HTTP `CONNECT` proxies. Proxy chains are supported too. Its main use is analysis: point a stubborn desktop app, CLI tool or game at Burp Suite, mitmproxy or a SOCKS pivot, even when that app has no proxy setting or ignores it.
 
-> **Status: early development.** This README describes the planned design. Nothing is usable yet; see the [roadmap](#roadmap).
+> **Status: early development.** The cross-platform core (configuration, rules, proxy protocols, chaining and the
+> relay) is built and tested, but traffic capture is not, so Proxynator can't be used as a tool yet. See the
+> [roadmap](#roadmap).
 
 ## Why another proxy tool?
 
@@ -114,7 +116,9 @@ The example below sends `test.exe` through a SOCKS5 proxy, sends `test3.exe` thr
 }
 ```
 
-Rules are checked top to bottom, and the first match wins. Traffic from the proxy's own process (for example Burp) and connections to configured proxy endpoints are never redirected, so loops can't happen. The final schema will be published in `schema/`.
+Rules are checked top to bottom, and the first match wins; connections that match no rule go direct. Connections to configured proxy endpoints are never redirected, so loops can't happen. If Burp itself would match one of your rules, exclude it by putting a `direct` rule for it first.
+
+The full format is described by the JSON schema in [`schema/config.schema.json`](schema/config.schema.json), and [`samples/config.json`](samples/config.json) contains the example above. The loader is strict: unknown properties, typos in values, and references to proxies that don't exist are reported with their location, and an invalid file is never partly applied.
 
 ## CLI (planned)
 
@@ -132,18 +136,18 @@ proxynator attach <pid> --rule <name>      # inject into a running process
 
 ## Building
 
-> The solution does not exist yet; these are the intended commands.
+You need the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```
 dotnet build Proxynator.sln -c Release
 dotnet test Proxynator.sln --filter "Category!=Integration"
 ```
 
-Integration tests need an elevated shell (Windows) or root (Linux): `dotnet test Proxynator.sln --filter "Category=Integration"`. The native injection DLL is built with CMake for x64 and x86. GitHub Actions builds and tests on Windows and Linux.
+GitHub Actions builds and tests every push on Windows and Linux. Later phases add integration tests, which need an elevated shell (Windows) or root (Linux), and the native injection DLL, built with CMake for x64 and x86.
 
 ## Roadmap
 
-1. Core: config, rule engine, proxy protocols, chaining, relay. Cross-platform and unit-tested.
+1. ✅ Core: config, rule engine, proxy protocols, chaining, relay. Cross-platform and unit-tested.
 2. Windows: kernel-level (`windivert`) TCP capture, service, IPC, basic CLI.
 3. DNS modes, UDP via SOCKS5, QUIC blocking, child-process rules.
 4. Windows: `injection` capture mode.
