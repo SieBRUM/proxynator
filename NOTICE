@@ -1,0 +1,16 @@
+Proxynator
+Copyright 2026 The Proxynator Authors
+https://github.com/SieBRUM/proxynator
+
+This product includes software developed as part of the Proxynator project.
+Redistributions and derivative works must retain this NOTICE file (or an
+equivalent attribution) as required by Section 4(d) of the Apache License 2.0.
+
+Third-party components (bundled or downloaded at build time):
+
+- WinDivert (https://reqrypt.org/windivert.html)
+  Copyright basil00 (reqrypt.org). Dual-licensed under LGPLv3 / GPLv2.
+  Used unmodified and loaded dynamically.
+
+- Microsoft Detours (https://github.com/microsoft/Detours)
+  Copyright Microsoft Corporation. Licensed under the MIT License.
