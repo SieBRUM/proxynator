@@ -4,10 +4,10 @@
 
 Proxynator is an open-source, rule-based traffic redirector for Windows (and, later, Linux). It captures the outbound connections of the applications you choose and sends them through SOCKS4, SOCKS4a, SOCKS5 or HTTP `CONNECT` proxies. Proxy chains are supported too. Its main use is analysis: point a stubborn desktop app, CLI tool or game at Burp Suite, mitmproxy or a SOCKS pivot, even when that app has no proxy setting or ignores it.
 
-> **Status: early development.** On Windows, TCP and UDP traffic can be captured and routed (kernel-level
-> `windivert` mode), including fake-IP DNS for resolving internal names through a pivot, controlled with the
-> `proxynator` CLI. `injection` mode, Linux and the GUI are still to come. See
-> [known limitations](#known-limitations) and the [roadmap](#roadmap).
+> **Status: early development.** On Windows, TCP and UDP traffic can be captured and routed machine-wide
+> (kernel-level `windivert` mode) or for the programs you start with `proxynator run` (`injection` mode), including
+> fake-IP DNS for resolving internal names through a pivot, controlled with the `proxynator` CLI. Linux and the GUI
+> are still to come. See [known limitations](#known-limitations) and the [roadmap](#roadmap).
 
 ## Why another proxy tool?
 
@@ -26,7 +26,7 @@ Proxynator's default mode captures traffic **at the kernel network layer** and t
 - ✅ **Actions:** `proxy`, `direct` or `block`.
 - **Two capture modes on Windows**, chosen by the user:
   - ✅ `windivert` (default): kernel-level capture through the signed WinDivert driver. It catches everything, including apps that ignore proxy settings.
-  - `injection`: user-mode hooking of Winsock through an injected DLL, for processes you launch or attach to. Lighter, but it can be bypassed.
+  - ✅ `injection`: user-mode hooking of Winsock through an injected DLL, only for the programs you start with `proxynator run` or attach to (and everything they start). Nothing machine-wide, but programs that bypass Winsock escape it.
 - **Configurable DNS handling:**
   - ✅ `sniff` (default): recover hostnames from TLS SNI or the HTTP `Host` header.
   - ✅ `local`: send the IP address the app resolved.
@@ -127,7 +127,7 @@ The full format is described by the JSON schema in [`schema/config.schema.json`]
 
 1. **Get a build.** Download the `proxynator-win-x64` artifact from the latest successful
    [CI run](https://github.com/SieBRUM/proxynator/actions/workflows/ci.yml). It is self-contained and includes the
-   WinDivert driver. Or build it yourself (see [Building](#building)).
+   WinDivert driver and the hook DLLs. Or build it yourself (see [Building](#building)).
 2. **Start the service** from an elevated PowerShell (*Run as administrator*):
    ```
    .\proxynatord.exe --config .\config.json
@@ -164,12 +164,61 @@ proxynator config load <file>           # validate and apply atomically; --no-sa
 proxynator config show                  # print the active configuration
 proxynator rules list                   # rules in evaluation order with their resolved routes
 proxynator connections [--follow]       # relayed connections: process, destination, rule, route, bytes
+proxynator run [--detach] -- <program> [args...]   # injection mode: start a program with the hook
+proxynator attach <pid>                 # injection mode: hook a running program
 ```
 
-Exit codes: `0` success, `1` failure (invalid config, failed checks), `2` service not reachable. Planned for the
-`injection` mode: `proxynator run -- app.exe` and `proxynator attach <pid>`.
+Exit codes: `0` success, `1` failure (invalid config, failed checks), `2` service not reachable. `proxynator run`
+returns the program's own exit code.
+
+## Injection mode
+
+In `injection` mode nothing is captured machine-wide. Instead, the programs you start with `proxynator run` (or hook
+later with `proxynator attach`) load a small DLL that asks `proxynatord` before every outbound connection, and
+connects to the relay when the rules say so. Everything those programs start is hooked too, including 32-bit
+programs started by 64-bit ones and the other way around. Use it when you want to proxy one tool without touching the
+rest of the machine, much like proxychains, but for Windows programs that ignore proxy settings.
+
+1. Set the capture mode and (re)start the service. The capture mode only changes on a restart:
+   ```json
+   "settings": { "capture": { "mode": "injection" } }
+   ```
+2. Start programs through Proxynator. Put `--` before the program so its options aren't read as Proxynator's:
+   ```
+   .\proxynator.exe run -- nxc smb dc01.corp.local -u alice -p 'Passw0rd!'
+   .\proxynator.exe run -- roadtx gettokens -u alice@corp.example
+   .\proxynator.exe run --detach -- "C:\Program Files\App\app.exe"
+   .\proxynator.exe attach 4321
+   ```
+   `run` finds the program on the `PATH` like a command prompt does (`.cmd`/`.bat` files run through `cmd.exe`),
+   waits for it and returns its exit code. The CLI doesn't need elevation for either command.
+
+The rules still decide what happens, but only hooked programs are affected, so a rule with an empty `match` means
+"everything I start with `proxynator run`". See [`samples/injection-run.json`](samples/injection-run.json).
+
+What is different from `windivert` mode:
+
+- **Fails closed when the service is gone.** Hooked programs then get "connection refused" instead of going direct.
+  A child process that can't be hooked isn't started.
+- **Remote DNS is per process.** Only hooked programs get fake addresses for `remoteDomains`; the rest of the machine
+  resolves normally and the DNS cache is not touched.
+- **Hostnames come from the program's own lookups**, so the proxy also gets them for protocols that can't be sniffed
+  (SMB, LDAP, Kerberos, ...). A hostname sniffed from TLS or HTTP still takes precedence.
+- **UDP** is not relayed yet: it follows the rule's `udp` setting (`block` by default, or `direct`), and QUIC is
+  blocked for proxied programs.
+- **Programs that bypass Winsock escape the hook**: raw system calls, custom network stacks, and processes that only
+  load Microsoft-signed DLLs (some browser sandboxes; a child the hook can't load into isn't started). Use
+  `windivert` mode for those. Programs already running only follow the rules for connections they open after
+  `proxynator attach`.
+
+Set the environment variable `PROXYNATOR_HOOK_LOG` to a file path before `proxynator run` to get a log from every
+hooked process (the hook also writes to the debugger output, visible in Sysinternals DebugView).
 
 ## Python tools (pipx, NetExec, roadtools)
+
+The simplest way is the [injection mode](#injection-mode): `proxynator run -- nxc smb ...` hooks the launcher, the
+Python interpreters it starts and everything else, with no rules about process names needed. With the machine-wide
+`windivert` mode, read on.
 
 Tools installed with pipx (or pip into a venv) don't run as their own process. `nxc.exe`, `roadrecon.exe` and
 `roadtx.exe` are small launchers that start the venv's `python.exe`, which in turn starts the real interpreter. That
@@ -197,15 +246,18 @@ Tips per tool:
   at a PEM file containing Burp's CA. `roadtx` interactive logins start a browser through chromedriver, and
   `includeChildren` routes that browser too.
 
-Ready-made configs: [`samples/netexec-socks-pivot.json`](samples/netexec-socks-pivot.json) and
-[`samples/roadtools-burp.json`](samples/roadtools-burp.json).
+Ready-made configs: [`samples/netexec-socks-pivot.json`](samples/netexec-socks-pivot.json),
+[`samples/roadtools-burp.json`](samples/roadtools-burp.json) and, for the injection mode,
+[`samples/injection-run.json`](samples/injection-run.json).
 
 ## Known limitations
 
 - **UDP** goes through a proxy only when the rule's target is a single SOCKS5 proxy. For HTTP or SOCKS4 proxies and
   chains, the rule's `udp` setting decides: `block` (default) or `direct`. QUIC (UDP/443) of proxied apps is
   blocked, so browsers fall back to TCP.
-- **Remote DNS** is machine-wide: Windows resolves names centrally (the DNS Client service), so every program gets
+- In `injection` mode UDP is not relayed (only `block` or `direct`), and programs that bypass Winsock escape the
+  hook; see [Injection mode](#injection-mode).
+- **Remote DNS** in `windivert` mode is machine-wide: Windows resolves names centrally (the DNS Client service), so every program gets
   fake answers for the names in `remoteDomains`. Programs without a proxy rule still work, because their connections
   to fake addresses go direct through the relay. Keep `remoteDomains` as narrow as you can. DNS over TCP, DNS servers
   on loopback and encrypted DNS (DoH) are not intercepted. Proxynator flushes the DNS cache when it starts and stops.
@@ -225,15 +277,27 @@ dotnet test Proxynator.sln --filter "Category!=Integration"
 ```
 
 Building on Windows downloads the pinned WinDivert release (SHA-256 verified) and places it next to
-`proxynatord`. For a self-contained Windows build:
+`proxynatord`.
+
+The injection mode's hook DLLs (`proxynator-hook64.dll`, `proxynator-hook32.dll`) are C++ and need
+[CMake](https://cmake.org/) and Visual Studio or the Build Tools with the "Desktop development with C++" workload.
+Build them first; the .NET build then copies them next to the executables (without them, everything except the
+injection mode still works):
+
+```
+./build/build-native.ps1
+```
+
+For a self-contained Windows build:
 
 ```
 dotnet publish src/Proxynator.Service -c Release -r win-x64 --self-contained -o out
 dotnet publish src/Proxynator.Cli -c Release -r win-x64 --self-contained -o out
 ```
 
-GitHub Actions builds and tests every push on Windows and Linux. On Windows it also runs end-to-end tests that route
-real `curl.exe` traffic through the WinDivert capture (these need an elevated prompt:
+GitHub Actions builds and tests every push on Windows and Linux. On Windows it also builds the hook DLLs, runs
+end-to-end tests that route real traffic through both capture modes (curl.exe 64- and 32-bit, nslookup, pip in a
+venv, PowerShell, attaching to running programs; these need an elevated prompt:
 `dotnet test tests/Proxynator.IntegrationTests`), and publishes the `proxynator-win-x64` build.
 
 ## Roadmap
@@ -241,7 +305,7 @@ real `curl.exe` traffic through the WinDivert capture (these need an elevated pr
 1. ✅ Core: config, rule engine, proxy protocols, chaining, relay. Cross-platform and unit-tested.
 2. ✅ Windows: kernel-level (`windivert`) TCP capture, service, IPC, basic CLI.
 3. ✅ Remote (fake-IP) DNS, UDP via SOCKS5, QUIC blocking, child-process rules that survive launcher exit.
-4. Windows: `injection` capture mode.
+4. ✅ Windows: `injection` capture mode (`proxynator run` / `attach`, child processes, both bitnesses).
 5. Linux: eBPF/nftables capture, `LD_PRELOAD` mode, systemd, `.deb` packages for Ubuntu and Kali.
 6. Cross-platform GUI.
 7. Later: connection log export, pcap output, statistics, TLS-to-proxy hops, ARM64.

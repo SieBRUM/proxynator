@@ -83,13 +83,35 @@ The user chooses the capture mode in config (`settings.capture.mode`).
   session nor registration and is dropped.
 - `block` action: TCP connections are relayed and reset; UDP datagrams are dropped by the UDP relay.
 
-**Windows – `injection` (user-mode, opt-in)**
-- Native hook DLL in `native/windows/hook` (C++, Microsoft Detours), built for **x64 and x86** so 32-bit targets work.
-- Applies to processes started via `proxynator run -- <cmd>` (created suspended, injected, resumed) or attached via `proxynator attach <pid>`, plus their children (`CreateProcessW` / `CreateProcessAsUserW` hooks propagate injection).
-- Hooks `connect`, `WSAConnect`, `ConnectEx`, `WSAConnectByName*`, and the resolver family (`getaddrinfo`, `GetAddrInfoW`, `GetAddrInfoExW`, `gethostbyname`).
-- Registration protocol: before connecting, the hook binds the socket (if unbound), sends `{pid, localEndpoint, originalDestination, hostname?}` to the service over a named pipe, then connects to the relay. This feeds the same `OriginalDestinationTable` as WinDivert, so the relay doesn't care which backend is active.
-- Known limitations (document, don't hide): processes with binary-signature mitigation (some browser sandboxes) refuse unsigned DLLs; raw syscalls / custom stacks bypass it. Recommend `windivert` mode in those cases.
-- TCP first; UDP in injection mode is `direct` or `block` only until implemented.
+**Windows – `injection` (user-mode, opt-in)** — see ADR 0004
+- Native hook DLL in `native/windows/hook` (C++17, Microsoft Detours at a pinned commit via CMake FetchContent,
+  static CRT), built for **x64 and x86** (`proxynator-hook64.dll` / `proxynator-hook32.dll`) by
+  `build/build-native.ps1` into `artifacts/native/win-x64|win-x86`; `build/NativeHook.targets` (imported by
+  `proxynatord` and `proxynator`) copies them when present. Ordinal 1 must stay `DetourFinishHelperProcess`.
+- Hooks are installed only in processes carrying the Detours payload (`payload.h`: pipe path). Elsewhere the DLL only
+  serves exports: `ProxynatorCreateProcess` / `ProxynatorAttach` (called by `HookInjector` in the CLI) and
+  `ProxynatorAttachRundllW` (32-bit attach via SysWOW64 rundll32).
+- Applies to processes started via `proxynator run -- <cmd>` (created suspended, injected, resumed) or attached via
+  `proxynator attach <pid>` (remote `LoadLibraryW`), plus their children (`CreateProcessInternalW` hook; the other
+  bitness through Detours' rundll32 helper).
+- Hooks `connect`, `WSAConnect`, `ConnectEx` (detoured when found via `WSAIoctl` or a start-up lookup),
+  `WSAConnectByName*` (reimplemented), `getpeername` (returns the original destination), `closesocket`, the UDP send
+  family (`sendto`, `WSASendTo`, `WSASendMsg`), and the resolver family (`getaddrinfo`, `GetAddrInfoW`,
+  `GetAddrInfoExW`, `gethostbyname`). A per-thread `ReentrancyGuard` makes only the outermost hook act (Detours
+  patches function bodies, so Winsock's internal calls are hooked too).
+- Registration protocol (`Core/Hooking/HookProtocol`, mirrored in `native/.../protocol.h` — keep in sync): one pipe
+  `<endpoint>.hook` per process. Before connecting, the hook binds unbound sockets to the wildcard address, sends
+  `Connect{protocol, local (wildcard reported as loopback), destination, hostname hint}`; `HookRequestHandler`
+  registers relayed connections in the same `OriginalDestinationTable` and answers direct / relay(endpoint) / block.
+  The PID comes from `GetNamedPipeClientProcessId`, never from the hook.
+- Remote DNS is per process here: `Resolve{name}` returns a fake address; the hook calls the real resolver with the
+  numeric fake address so Winsock allocates the results. Other lookups become hostname hints
+  (`OriginalDestination.HostnameIsHint`), which the relay replaces with a sniffed name when there is one.
+- Fails closed: service unreachable → connections refused; hooks not installable → DllMain fails; child not
+  hookable → terminated. `PROXYNATOR_HOOK_LOG=<file>` logs from every hooked process (also OutputDebugString).
+- Known limitations (document, don't hide): processes with binary-signature mitigation (some browser sandboxes)
+  refuse unsigned DLLs; raw syscalls / custom stacks bypass it. Recommend `windivert` mode in those cases.
+- UDP in injection mode is `direct` or `block` only (rule `udp` fallback, QUIC blocking) until implemented.
 
 **Linux (later)**
 - `ebpf` (default): `cgroup/connect4`, `cgroup/connect6`, `cgroup/sendmsg4/6` programs on the root cgroup rewrite the destination to the relay and store the original in a BPF map. Target PIDs/cgroups are pushed into a BPF map by the service, tracking process exec events. BPF C sources in `native/linux/bpf`, loaded via libbpf (P/Invoke).
@@ -112,7 +134,7 @@ Connections to fake addresses always go to the relays, which use the hostname: p
 resolve it with `ModeAwareResolver`, which queries the upstream DNS servers directly (`UpstreamDnsResolver`) while
 remote mode is on — the system resolver would return Proxynator's own fake answers.
 
-Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost.exe`), not by the app, so per-process attribution of DNS packets is impossible in `windivert` mode. `remote` mode in `windivert` is therefore applied system-wide for the listed domains (relay sends non-proxied fake-IP connections direct after real resolution). That includes the service's own process and in-process tests: resolve real addresses before turning remote mode on. In `injection`/`preload` mode the resolver hooks will make it per-process. Apps using their own DoH just look like ordinary TCP/443 flows and are handled by the rules.
+Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost.exe`), not by the app, so per-process attribution of DNS packets is impossible in `windivert` mode. `remote` mode in `windivert` is therefore applied system-wide for the listed domains (relay sends non-proxied fake-IP connections direct after real resolution). That includes the service's own process and in-process tests: resolve real addresses before turning remote mode on. In `injection` mode the resolver hooks make it per-process (`preload` will too). Apps using their own DoH just look like ordinary TCP/443 flows and are handled by the rules.
 
 ### UDP
 
@@ -192,18 +214,24 @@ src/
     Proxies/                         SOCKS4/4a, SOCKS5 (+ UDP ASSOCIATE), HTTP CONNECT clients, ProxyRouteDialer (chains)
     Sniffing/                        HostnameSniffer (TLS SNI, HTTP Host)
     Relay/                           RelayServer (TCP), UdpRelayServer, IOriginalDestinationTable, ConnectionTracker
+    Hooking/                         hook registration protocol, HookRequestHandler (decisions), HookSession
     Platform/                        ICaptureBackend, CaptureContext, IPrivilegeChecker
   Proxynator.Platform.Windows/     WindowsPlatformModule, WinDivert interop + capture backend (Capture/,
-                                   Interop/, Packets/), process info with ancestors, admin check, firewall rule
+                                   Interop/, Packets/), InjectionCaptureBackend (hook pipe), Injection/ (HookInjector,
+                                   command line quoting, PATH lookup), process info with ancestors, admin check,
+                                   firewall rule
   Proxynator.Platform.Linux/       (later) eBPF/nftables capture, preload controller, root check
   Proxynator.Ipc/                  .proto contracts, generated client/server, ControlClientFactory, IpcEndpoint
   Proxynator.Service/              proxynatord: ServiceHost (Kestrel on pipe/socket, Windows service, systemd),
                                    ProxynatorEngine, ControlService (gRPC), platform selection
-  Proxynator.Cli/                  proxynator CLI (System.CommandLine; Commands.cs is testable with captured output)
+  Proxynator.Cli/                  proxynator CLI (System.CommandLine; Commands.cs is testable with captured output;
+                                   InjectionCommands.cs: run, attach)
   Proxynator.Gui/                  (later) Avalonia GUI (thin IPC client)
 build/
   WinDivert.targets                pinned WinDivert download + verification, imported by executables
-native/                            (later)
+  NativeHook.targets               copies the hook DLLs from artifacts/native, imported by executables
+  build-native.ps1                 builds the hook DLLs (CMake + MSVC, x64 and x86)
+native/
   windows/hook/                    C++ Detours hook DLL (x64 + x86)
   linux/preload/                   (later) LD_PRELOAD .so
   linux/bpf/                       (later) eBPF programs
@@ -211,7 +239,7 @@ tests/
   Proxynator.Core.Tests/           Pure unit tests, run on both OSes (Support/ has fake proxies, echo server)
   Proxynator.Platform.Windows.Tests/  NAT, packet parsing, interop struct layouts; run on both OSes
   Proxynator.Service.Tests/        In-process proxynatord + CLI over a real pipe/socket, fake platform module
-  Proxynator.IntegrationTests/     Real WinDivert capture with curl.exe; elevated Windows + internet only;
+  Proxynator.IntegrationTests/     Real WinDivert and injection capture with curl.exe etc.; elevated Windows + internet only;
                                    tagged [Trait("Category","Integration")], skipped elsewhere unless
                                    PROXYNATOR_REQUIRE_INTEGRATION=1 (CI), which turns a skip into a failure
 schema/                            config JSON schema (keep in sync with the config model)
@@ -245,10 +273,14 @@ docs/                              design notes, ADRs (docs/adr/NNNN-title.md)
 Requires the .NET 10 SDK (`global.json` pins the 10.0 feature band, rolling forward).
 
 ```
+./build/build-native.ps1                               # Windows: hook DLLs (CMake + VS C++ workload); optional
 dotnet build Proxynator.sln -c Release
 dotnet test Proxynator.sln --filter "Category!=Integration"
 dotnet test tests/Proxynator.IntegrationTests          # elevated Windows with internet access only
 ```
+
+The native sources can be syntax-checked on Linux with MinGW (`x86_64-w64-mingw32-g++` / `i686-w64-mingw32-g++
+-std=c++17 -fsyntax-only -I<detours>/src ...`); the real build is MSVC in CI.
 
 Run locally (elevated on Windows; on Linux only with `--no-capture` until phase 5):
 
@@ -261,9 +293,9 @@ On Linux, `-p:IncludeWinDivert=true` forces the WinDivert download (e.g. to chec
 Windows publish (`dotnet publish src/Proxynator.Service -c Release -r win-x64 --self-contained`) can be produced from
 Linux too.
 
-CI (`.github/workflows/ci.yml`) builds and unit-tests in Release on `windows-latest` and `ubuntu-latest`, runs the
-WinDivert integration tests on the Windows runner (elevated) and uploads a self-contained `proxynator-win-x64`
-build. Later phases add the native hook DLL build (x64 + x86).
+CI (`.github/workflows/ci.yml`) builds and unit-tests in Release on `windows-latest` and `ubuntu-latest`; on the
+Windows runner it first builds the hook DLLs (x64 + x86), runs the WinDivert and injection integration tests
+(elevated) and uploads a self-contained `proxynator-win-x64` build.
 
 Before pushing: build with zero warnings (warnings are errors) and run the unit tests. Network tests run in
 parallel, so run the suite a few times when touching the relay or proxy code to catch races. Code that only runs on
@@ -280,7 +312,13 @@ Windows (WinDivert, Win32) is only exercised by CI's Windows job; check it after
 - `pkill -f <pattern>` in a shell whose own command line contains the pattern kills that shell; use PID files.
 - Windows-only behaviour that unit tests can't reach (real driver, Dnscache, firewall, process launch chains) is
   covered by `tests/Proxynator.IntegrationTests`: curl.exe (TCP, SNI/Host sniffing, block, fail-closed, remote DNS
-  proxied and direct), nslookup.exe (UDP through SOCKS5) and a venv's pip.exe (pipx-style launcher chain).
+  proxied and direct), nslookup.exe (UDP through SOCKS5) and a venv's pip.exe (pipx-style launcher chain); for
+  injection: 64/32-bit curl, cmd.exe children across bitness, fail-closed without service, per-process remote DNS,
+  pwsh (.NET ConnectEx), pip, attach to 64-bit python and 32-bit Windows PowerShell. The hook log is printed.
+- Integration tests never run in parallel (`DisableTestParallelization`): capture affects the machine or the started
+  processes.
+- `cmd.exe` does not parse its command line like the C runtime: build `cmd /d /s /c "..."` lines by hand, don't
+  pass them through `WindowsCommandLine.Join`.
 
 ## Roadmap
 
@@ -288,7 +326,7 @@ Windows (WinDivert, Win32) is only exercised by CI's Windows job; check it after
 - [x] Phase 1 — Solution scaffold, CI, Core: config model + schema + validation, rule engine, SOCKS4/4a/5 + HTTP CONNECT clients with auth, chain dialer, relay with hostname sniffing, `OriginalDestinationTable`. Fully unit-tested on both OSes.
 - [x] Phase 2 — Windows `windivert` TCP capture, PID attribution, exclusions, privilege check, `proxynatord` (console + Windows service), gRPC IPC, basic CLI (`status`, `config load|validate`, `rules list`, `connections`, `doctor`).
 - [x] Phase 3 — DNS modes (`sniff`, `remote` fake-IP), UDP capture + relay via SOCKS5, QUIC blocking, child-process matching with process history.
-- [ ] Phase 4 — Windows `injection` mode (Detours hook DLL x64/x86, `run`, `attach`, child propagation).
+- [x] Phase 4 — Windows `injection` mode (Detours hook DLL x64/x86, `run`, `attach`, child propagation, per-process remote DNS).
 - [ ] Phase 5 — Linux: `ebpf` + `nftables` capture, `preload` mode, systemd unit, `.deb` packaging for Ubuntu/Kali.
 - [ ] Phase 6 — Avalonia GUI.
 - [ ] Later — connection log export, pcap output, statistics, `https` (TLS-to-proxy) hops, ARM64 (Linux first; WinDivert has no ARM64 build).

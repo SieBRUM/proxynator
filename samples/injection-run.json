@@ -1,0 +1,29 @@
+{
+  "$schema": "../schema/config.schema.json",
+  "version": 1,
+  "settings": {
+    // Only programs started with 'proxynator run' (or attached with 'proxynator attach') and their children are
+    // affected; the rest of the machine is untouched.
+    "capture": { "mode": "injection" },
+    // Per process in this mode: only hooked programs get fake addresses for these names.
+    "dns": { "mode": "remote", "remoteDomains": ["corp.local", "*.corp.local"] }
+  },
+  "proxies": [
+    { "id": "pivot", "type": "socks5", "host": "127.0.0.1", "port": 1080 },
+    { "id": "burp", "type": "http", "host": "127.0.0.1", "port": 8080 }
+  ],
+  "rules": [
+    {
+      // proxynator run -- roadtx gettokens ...   (HTTPS to Entra ID, inspected in Burp)
+      "name": "roadtools via Burp",
+      "match": { "processes": ["roadrecon.exe", "roadtx.exe"], "includeChildren": true },
+      "action": { "type": "proxy", "target": "burp", "udp": "block" }
+    },
+    {
+      // proxynator run -- nxc smb dc01.corp.local ...   (and anything else started with proxynator run)
+      "name": "everything else started with proxynator run",
+      "match": {},
+      "action": { "type": "proxy", "target": "pivot", "udp": "block" }
+    }
+  ]
+}
