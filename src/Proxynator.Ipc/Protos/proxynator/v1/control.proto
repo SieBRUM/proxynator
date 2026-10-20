@@ -68,6 +68,8 @@ message CaptureStatus {
   string mode = 1;
   CaptureState state = 2;
   string detail = 3;
+  // What the running backend is doing, e.g. "3 hooked process(es)".
+  string activity = 4;
 }
 
 message GetConfigRequest {}

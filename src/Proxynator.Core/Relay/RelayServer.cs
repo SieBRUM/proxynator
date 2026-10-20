@@ -194,6 +194,7 @@ public sealed class RelayServer : IAsyncDisposable
         var settings = active.Settings;
         IPAddress? address = original.Destination.Address.Normalize();
         var hostname = original.Hostname;
+        var hostnameIsHint = original.HostnameIsHint;
         if (fakeIps?.Contains(address) == true)
         {
             // A fake-IP DNS answer: the hostname is the real destination; the address means nothing outside this machine.
@@ -205,6 +206,7 @@ public sealed class RelayServer : IAsyncDisposable
             }
 
             address = null;
+            hostnameIsHint = false;
         }
 
         var context = new ConnectionContext(
@@ -220,11 +222,12 @@ public sealed class RelayServer : IAsyncDisposable
         try
         {
             // In remote mode, names that were not faked (excluded domains, hosts file entries) are sniffed as well.
-            if (settings.Dns.Mode != DnsMode.Local && context.DestinationHost is null &&
+            // A hostname hint from the process's lookups is checked against the sniffed name: addresses are shared.
+            if (settings.Dns.Mode != DnsMode.Local && (context.DestinationHost is null || hostnameIsHint) &&
                 (decision.Action == RuleActionType.Proxy || active.Rules.UsesHostCriteria))
             {
                 prelude = await ClientPrelude.ReadAsync(clientStream, TimeSpan.FromMilliseconds(settings.Dns.SniffTimeoutMs), cancellationToken).ConfigureAwait(false);
-                if (prelude.Hostname is { } sniffed)
+                if (prelude.Hostname is { } sniffed && !string.Equals(sniffed, context.DestinationHost, StringComparison.OrdinalIgnoreCase))
                 {
                     context = context with { DestinationHost = sniffed };
                     decision = active.Rules.Evaluate(context);

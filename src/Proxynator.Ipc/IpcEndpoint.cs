@@ -21,6 +21,12 @@ public static class IpcEndpoint
             ? fromEnvironment
             : OperatingSystem.IsWindows() ? DefaultPipeName : DefaultUnixSocketPath;
 
+    /// <summary>
+    /// The endpoint user-mode hooks register connections on (injection / preload capture): <c>&lt;endpoint&gt;.hook</c>,
+    /// i.e. the pipe <c>proxynator.v1.hook</c> by default on Windows.
+    /// </summary>
+    public static string HookEndpoint(string endpoint) => endpoint + ".hook";
+
     /// <summary>A human-readable form, e.g. <c>\\.\pipe\proxynator.v1</c>.</summary>
     public static string Describe(string endpoint) => OperatingSystem.IsWindows() ? $@"\\.\pipe\{endpoint}" : endpoint;
 }

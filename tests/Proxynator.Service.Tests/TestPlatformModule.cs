@@ -44,6 +44,8 @@ internal sealed class FakeCaptureBackend : ICaptureBackend
 
     public CaptureMode Mode => CaptureMode.WinDivert;
 
+    public string Activity => "test activity";
+
     public IReadOnlyList<IPEndPoint> RelayListenEndpoints => [new IPEndPoint(IPAddress.Loopback, 0)];
 
     public Task StartAsync(CaptureContext context, CancellationToken cancellationToken)

@@ -14,7 +14,8 @@ internal sealed class Commands(string endpoint, TextWriter output, TextWriter er
         var status = await client.GetStatusAsync(new GetStatusRequest(), cancellationToken: cancellationToken);
         var uptime = DateTimeOffset.UtcNow - status.StartedAt.ToDateTimeOffset();
         output.WriteLine($"proxynatord {status.Version} on {status.Platform} (pid {status.ProcessId}), up {Format.Duration(uptime)}");
-        output.WriteLine($"Capture:      {status.Capture.Mode} - {DescribeState(status.Capture.State)}");
+        var activity = status.Capture.Activity.Length > 0 ? $" ({status.Capture.Activity})" : string.Empty;
+        output.WriteLine($"Capture:      {status.Capture.Mode} - {DescribeState(status.Capture.State)}{activity}");
         if (status.Capture.State is CaptureState.Failed or CaptureState.Disabled)
         {
             output.WriteLine($"              {status.Capture.Detail}");

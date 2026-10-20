@@ -24,4 +24,10 @@ public sealed record CaptureContext(
 
     /// <summary>The fake-IP pool: connections to its addresses always go to the relay, which knows the real hostname.</summary>
     public FakeIpPool? FakeIps { get; init; }
+
+    /// <summary>
+    /// Where user-mode hooks (injected DLL, preload library) register connections: a pipe name on Windows, a socket
+    /// path elsewhere. Null when the service has no hook endpoint.
+    /// </summary>
+    public string? HookEndpoint { get; init; }
 }

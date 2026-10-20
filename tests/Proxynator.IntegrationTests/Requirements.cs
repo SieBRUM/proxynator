@@ -8,8 +8,8 @@ internal static class Requirements
     public static void ElevatedWindows()
     {
         string? missing = !OperatingSystem.IsWindows()
-            ? "WinDivert integration tests need Windows."
-            : !IsElevated() ? "WinDivert integration tests need an elevated (Administrator) process." : null;
+            ? "Capture integration tests need Windows."
+            : !IsElevated() ? "Capture integration tests need an elevated (Administrator) process." : null;
         if (missing is null)
         {
             return;
@@ -21,6 +21,25 @@ internal static class Requirements
         }
 
         Assert.Skip(missing);
+    }
+
+    /// <summary>Like <see cref="ElevatedWindows"/>, and the hook DLLs (built by build/build-native.ps1) must be present.</summary>
+    public static void ElevatedWindowsWithHooks()
+    {
+        ElevatedWindows();
+        var missing = Platform.Windows.Injection.HookLibrary.Missing();
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        var message = $"The hook DLLs are missing ({string.Join(", ", missing)}); build them with build/build-native.ps1.";
+        if (Environment.GetEnvironmentVariable("PROXYNATOR_REQUIRE_INTEGRATION") == "1")
+        {
+            Assert.Fail(message + " PROXYNATOR_REQUIRE_INTEGRATION=1 is set, so this is an error.");
+        }
+
+        Assert.Skip(message);
     }
 
     private static bool IsElevated()

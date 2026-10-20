@@ -61,6 +61,9 @@ public sealed partial class WinDivertCaptureBackend : ICaptureBackend
     public int RedirectedConnections => nat?.Count ?? 0;
 
     /// <inheritdoc />
+    public string Activity => string.Create(CultureInfo.InvariantCulture, $"{RedirectedConnections} redirected flow(s)");
+
+    /// <inheritdoc />
     public async Task StartAsync(CaptureContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);

@@ -1,15 +1,12 @@
 using System.Net;
 using System.Net.Sockets;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.DependencyInjection;
 using Proxynator.Core.Tests.Support;
-using Proxynator.Service;
 
 namespace Proxynator.IntegrationTests;
 
 /// <summary>
-/// Real traffic from curl.exe through the WinDivert capture backend. Each test runs its own in-process service, so
-/// the tests in this class run one after another.
+/// Real traffic from curl.exe through the WinDivert capture backend. Each test runs its own in-process service; the
+/// integration tests never run in parallel (see AssemblyInfo.cs).
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed class WinDivertCaptureTests : IAsyncLifetime
@@ -197,38 +194,5 @@ public sealed class WinDivertCaptureTests : IAsyncLifetime
         }
         """;
 
-    private async Task<RunningService> StartAsync(string configJson)
-    {
-        var configPath = Path.Combine(directory, "config.json");
-        await File.WriteAllTextAsync(configPath, configJson);
-        var options = new ServiceOptions
-        {
-            ConfigPath = configPath,
-            Endpoint = $"proxynator-it-{Guid.NewGuid():N}",
-            Verbose = true,
-        };
-
-        var app = ServiceHost.Build(options);
-        await app.StartAsync(TestTimeout.Token(30));
-        var engine = app.Services.GetRequiredService<ProxynatorEngine>();
-        Assert.True(engine.CaptureState == CaptureState.Running, $"Capture did not start: {engine.CaptureDetail}");
-        return new RunningService(app);
-    }
-
-    private sealed class RunningService(WebApplication app) : IAsyncDisposable
-    {
-        private bool disposed;
-
-        public async ValueTask DisposeAsync()
-        {
-            if (disposed)
-            {
-                return;
-            }
-
-            disposed = true;
-            await app.StopAsync(TestTimeout.Token(30));
-            await app.DisposeAsync();
-        }
-    }
+    private Task<IntegrationService> StartAsync(string configJson) => IntegrationService.StartAsync(directory, configJson);
 }

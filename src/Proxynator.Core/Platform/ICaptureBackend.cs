@@ -19,6 +19,9 @@ public interface ICaptureBackend : IAsyncDisposable
     /// </summary>
     IReadOnlyList<IPEndPoint> RelayListenEndpoints { get; }
 
+    /// <summary>A short description of current activity for <c>proxynator status</c>, e.g. <c>3 hooked process(es)</c>.</summary>
+    string Activity { get; }
+
     /// <summary>Starts capturing.</summary>
     Task StartAsync(CaptureContext context, CancellationToken cancellationToken);
 

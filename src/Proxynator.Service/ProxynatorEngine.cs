@@ -19,6 +19,7 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
     private readonly ILogger logger = loggerFactory.CreateLogger<ProxynatorEngine>();
     private readonly SemaphoreSlim applyLock = new(1, 1);
     private ICaptureBackend? capture;
+    private int connectionWatchers;
 
     public ServiceOptions Options => options;
 
@@ -42,6 +43,9 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
 
     public ConnectionTracker Tracker { get; } = new();
 
+    /// <summary>The number of clients currently streaming connection events (<c>proxynator connections --follow</c>).</summary>
+    public int ConnectionWatchers => Volatile.Read(ref connectionWatchers);
+
     public RelayServer? Relay { get; private set; }
 
     /// <summary>The capture mode in effect (resolved from <see cref="CaptureMode.Auto"/>), or null with --no-capture.</summary>
@@ -50,6 +54,9 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
     public CaptureState CaptureState { get; private set; } = CaptureState.Stopped;
 
     public string CaptureDetail { get; private set; } = string.Empty;
+
+    /// <summary>What the running capture backend is doing, or null when none is running.</summary>
+    public string? CaptureActivity => CaptureState == CaptureState.Running ? capture?.Activity : null;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -118,6 +125,13 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
     }
 
     public void Dispose() => applyLock.Dispose();
+
+    /// <summary>Counts a connection watcher until the returned object is disposed.</summary>
+    public IDisposable AddConnectionWatcher()
+    {
+        Interlocked.Increment(ref connectionWatchers);
+        return new Watcher(this);
+    }
 
     /// <summary>Validates, applies and optionally saves a configuration. Never partially applies.</summary>
     public async Task<ConfigApplyResult> ApplyConfigAsync(string json, bool persist, CancellationToken cancellationToken)
@@ -264,6 +278,7 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
                 UdpDestinations = UdpDestinations,
                 UdpRelayEndpoints = UdpRelay!.LocalEndpoints,
                 FakeIps = FakeIps,
+                HookEndpoint = Ipc.IpcEndpoint.HookEndpoint(options.Endpoint),
             };
             await capture!.StartAsync(context, cancellationToken).ConfigureAwait(false);
             CaptureState = CaptureState.Running;
@@ -300,6 +315,19 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
         return AddressRange.TryParse(config.Settings.Dns.FakeIpRange, out var range) && range.ToString() != FakeIps.Range.ToString()
             ? $"The fake-IP range changed to {range}; restart proxynatord to use it."
             : null;
+    }
+
+    private sealed class Watcher(ProxynatorEngine engine) : IDisposable
+    {
+        private int disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) == 0)
+            {
+                Interlocked.Decrement(ref engine.connectionWatchers);
+            }
+        }
     }
 
     private static partial class Log

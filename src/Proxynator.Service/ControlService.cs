@@ -35,6 +35,7 @@ internal sealed class ControlService(ProxynatorEngine engine) : Control.ControlB
                     _ => Ipc.V1.CaptureState.Stopped,
                 },
                 Detail = engine.CaptureDetail,
+                Activity = engine.CaptureActivity ?? string.Empty,
             },
             ConfigPath = engine.Options.ConfigPath,
             RuleCount = active.Rules.Count,
@@ -112,6 +113,7 @@ internal sealed class ControlService(ProxynatorEngine engine) : Control.ControlB
 
         engine.Tracker.Opened += Opened;
         engine.Tracker.Closed += Closed;
+        using var watcher = engine.AddConnectionWatcher();
         try
         {
             await foreach (var connectionEvent in events.Reader.ReadAllAsync(context.CancellationToken).ConfigureAwait(false))

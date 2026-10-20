@@ -1,0 +1,7 @@
+; Exports of the Proxynator hook DLL. Ordinal 1 must be DetourFinishHelperProcess: Detours adds the DLL to a target's
+; import table by ordinal 1 and runs it through rundll32 ("<dll>",#1) when the target has the other bitness.
+EXPORTS
+    DetourFinishHelperProcess @1 NONAME
+    ProxynatorCreateProcess
+    ProxynatorAttach
+    ProxynatorAttachRundllW

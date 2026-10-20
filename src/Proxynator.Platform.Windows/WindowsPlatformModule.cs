@@ -4,6 +4,7 @@ using Proxynator.Core.Configuration;
 using Proxynator.Core.Platform;
 using Proxynator.Core.Processes;
 using Proxynator.Platform.Windows.Capture;
+using Proxynator.Platform.Windows.Injection;
 using Proxynator.Platform.Windows.Interop;
 using Proxynator.Platform.Windows.Processes;
 
@@ -32,14 +33,14 @@ public sealed class WindowsPlatformModule : IPlatformModule, IDisposable
     public IProcessInfoProvider ProcessInfo => processInfo;
 
     /// <inheritdoc />
-    public bool Supports(CaptureMode mode) => mode is CaptureMode.WinDivert;
+    public bool Supports(CaptureMode mode) => mode is CaptureMode.WinDivert or CaptureMode.Injection;
 
     /// <inheritdoc />
     public ICaptureBackend CreateCaptureBackend(CaptureMode mode, ILoggerFactory loggerFactory) => mode switch
     {
         CaptureMode.WinDivert => new WinDivertCaptureBackend(processInfo, loggerFactory.CreateLogger<WinDivertCaptureBackend>()),
-        CaptureMode.Injection => throw new NotSupportedException("The injection capture mode is not implemented yet (roadmap phase 4). Use \"windivert\"."),
-        _ => throw new NotSupportedException($"Capture mode '{mode}' is not available on Windows. Use \"windivert\"."),
+        CaptureMode.Injection => new InjectionCaptureBackend(processInfo, loggerFactory.CreateLogger<InjectionCaptureBackend>()),
+        _ => throw new NotSupportedException($"Capture mode '{mode}' is not available on Windows. Use \"windivert\" or \"injection\"."),
     };
 
     /// <inheritdoc />
@@ -57,5 +58,10 @@ public sealed class WindowsPlatformModule : IPlatformModule, IDisposable
         yield return missing.Count == 0
             ? new DiagnosticResult("WinDivert files", DiagnosticStatus.Ok, $"WinDivert.dll and WinDivert64.sys found in {directory}.")
             : new DiagnosticResult("WinDivert files", DiagnosticStatus.Error, $"Missing in {directory}: {string.Join(", ", missing)}. Build on Windows (or with -p:IncludeWinDivert=true) so they are downloaded.");
+
+        var missingHooks = HookLibrary.Missing();
+        yield return missingHooks.Count == 0
+            ? new DiagnosticResult("Hook DLLs", DiagnosticStatus.Ok, $"{HookLibrary.FileName64} and {HookLibrary.FileName32} found (injection mode).")
+            : new DiagnosticResult("Hook DLLs", DiagnosticStatus.Warning, $"Missing in {directory}: {string.Join(", ", missingHooks)}. The injection capture mode needs them; build them with build/build-native.ps1.");
     }
 }

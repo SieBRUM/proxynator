@@ -31,6 +31,12 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      # The injection mode's hook DLLs (C++, Microsoft Detours), x64 and x86. Built first: the .NET build copies them.
+      - name: Build hook DLLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./build/build-native.ps1
+
       - name: Restore
         run: dotnet restore Proxynator.sln
 
@@ -46,9 +52,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      # Real traffic through the WinDivert capture backend. GitHub's Windows runners are elevated; the variable
-      # turns a skipped test (no admin / not Windows) into a failure so this can never pass silently.
-      - name: Integration tests (WinDivert)
+      # Real traffic through the WinDivert and injection capture backends. GitHub's Windows runners are elevated; the
+      # variable turns a skipped test (no admin / not Windows / no hook DLLs) into a failure so this can never pass
+      # silently.
+      - name: Integration tests (WinDivert, injection)
         if: runner.os == 'Windows'
         env:
           PROXYNATOR_REQUIRE_INTEGRATION: '1'
@@ -62,7 +69,8 @@ jobs:
           path: TestResults
           if-no-files-found: ignore
 
-      # A self-contained build (no .NET install needed) with proxynatord, proxynator and the WinDivert driver.
+      # A self-contained build (no .NET install needed) with proxynatord, proxynator, the WinDivert driver and the
+      # hook DLLs.
       - name: Publish Windows build
         if: runner.os == 'Windows'
         run: |

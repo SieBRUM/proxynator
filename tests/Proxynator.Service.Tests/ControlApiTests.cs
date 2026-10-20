@@ -84,7 +84,10 @@ public class ControlApiTests
         await using var service = await TestService.StartAsync(platform);
         await using var echo = new EchoServer();
         using var watch = service.Client.WatchConnections(new WatchConnectionsRequest(), cancellationToken: ct);
-        await Task.Delay(200, ct); // let the watch subscribe
+        while (service.Engine.ConnectionWatchers == 0)
+        {
+            await Task.Delay(20, ct); // the call reaches the service asynchronously
+        }
 
         // Simulate a capture backend: register the client endpoint, then connect to the relay.
         using var client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);

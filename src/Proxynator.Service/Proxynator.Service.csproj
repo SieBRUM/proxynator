@@ -27,4 +27,7 @@
   <!-- WinDivert.dll and WinDivert64.sys ship next to proxynatord (Windows builds only). -->
   <Import Project="..\..\build\WinDivert.targets" />
 
+  <!-- The injection mode's hook DLLs (when built, see build/build-native.ps1). -->
+  <Import Project="..\..\build\NativeHook.targets" />
+
 </Project>
