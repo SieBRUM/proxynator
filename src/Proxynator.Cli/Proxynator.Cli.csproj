@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>proxynator</AssemblyName>
+    <RootNamespace>Proxynator.Cli</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Proxynator.Core\Proxynator.Core.csproj" />
+    <ProjectReference Include="..\Proxynator.Ipc\Proxynator.Ipc.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Proxynator.Service.Tests" />
+  </ItemGroup>
+
+</Project>

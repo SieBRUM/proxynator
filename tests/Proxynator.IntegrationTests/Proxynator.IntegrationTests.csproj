@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    End-to-end tests against the real capture backend. They need Windows and an elevated process (GitHub's
+    windows-latest runners qualify) and internet access. Elsewhere they are skipped, unless
+    PROXYNATOR_REQUIRE_INTEGRATION=1, which turns a skip into a failure (used in CI).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CA1707;CA2007;CA1515;CA1001;CA1848;CA1849;xUnit1051</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Proxynator.Service\Proxynator.Service.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Proxynator.Core.Tests\Support\TestTimeout.cs" Link="Support\TestTimeout.cs" />
+    <Compile Include="..\Proxynator.Core.Tests\Support\FakeProxyServer.cs" Link="Support\FakeProxyServer.cs" />
+    <Compile Include="..\Proxynator.Core.Tests\Support\Tunnel.cs" Link="Support\Tunnel.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

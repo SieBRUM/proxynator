@@ -1,0 +1,31 @@
+<Project>
+  <!--
+    Downloads the pinned WinDivert release, verifies its SHA-256 and copies WinDivert.dll / WinDivert64.sys next to
+    the application. Import it in executable projects only (the files flow to projects that reference them). Runs
+    when building on Windows or for a Windows runtime identifier; force it elsewhere with -p:IncludeWinDivert=true.
+    WinDivert is used unmodified and loaded dynamically (LGPLv3), see NOTICE.
+  -->
+  <PropertyGroup>
+    <WinDivertVersion>2.2.2</WinDivertVersion>
+    <WinDivertSha256>63CB41763BB4B20F600B6DE04E991A9C2BE73279E317D4D82F237B150C5F3F15</WinDivertSha256>
+    <WinDivertUrl>https://github.com/basil00/WinDivert/releases/download/v$(WinDivertVersion)/WinDivert-$(WinDivertVersion)-A.zip</WinDivertUrl>
+    <WinDivertCacheDir>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '.cache', 'windivert', '$(WinDivertVersion)'))</WinDivertCacheDir>
+    <WinDivertPackageDir>$(WinDivertCacheDir)WinDivert-$(WinDivertVersion)-A\</WinDivertPackageDir>
+    <IncludeWinDivert Condition="'$(IncludeWinDivert)' == '' and ('$(OS)' == 'Windows_NT' or $(RuntimeIdentifier.StartsWith('win')))">true</IncludeWinDivert>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IncludeWinDivert)' == 'true'">
+    <None Include="$(WinDivertPackageDir)x64\WinDivert.dll" Link="WinDivert.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="$(WinDivertPackageDir)x64\WinDivert64.sys" Link="WinDivert64.sys" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="$(WinDivertPackageDir)LICENSE" Link="WinDivert-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="FetchWinDivert"
+          Condition="'$(IncludeWinDivert)' == 'true' and !Exists('$(WinDivertCacheDir)verified.stamp')"
+          BeforeTargets="BeforeBuild;AssignTargetPaths;GetCopyToOutputDirectoryItems">
+    <DownloadFile SourceUrl="$(WinDivertUrl)" DestinationFolder="$(WinDivertCacheDir)" DestinationFileName="WinDivert.zip" Retries="3" RetryDelayMilliseconds="2000" />
+    <VerifyFileHash File="$(WinDivertCacheDir)WinDivert.zip" Hash="$(WinDivertSha256)" Algorithm="SHA256" />
+    <Unzip SourceFiles="$(WinDivertCacheDir)WinDivert.zip" DestinationFolder="$(WinDivertCacheDir)" />
+    <Touch Files="$(WinDivertCacheDir)verified.stamp" AlwaysCreate="true" />
+  </Target>
+</Project>

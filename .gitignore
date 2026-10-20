@@ -480,3 +480,6 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Downloaded third-party binaries (WinDivert)
+.cache/

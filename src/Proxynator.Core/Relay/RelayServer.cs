@@ -58,7 +58,10 @@ public sealed class RelayServer : IAsyncDisposable
     /// <summary>The endpoints the relay is listening on (with actual ports when port 0 was requested).</summary>
     public IReadOnlyList<IPEndPoint> LocalEndpoints { get; private set; } = [];
 
-    /// <summary>Binds the listeners and starts accepting connections.</summary>
+    /// <summary>
+    /// Binds the listeners and starts accepting connections. <see cref="IPAddress.IPv6Any"/> listens dual-mode
+    /// (IPv4 and IPv6).
+    /// </summary>
     public void Start(IEnumerable<IPEndPoint> endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -77,7 +80,8 @@ public sealed class RelayServer : IAsyncDisposable
                 listeners.Add(listener);
                 if (endpoint.AddressFamily == AddressFamily.InterNetworkV6)
                 {
-                    listener.DualMode = false;
+                    // [::] also accepts IPv4 (as mapped addresses, normalized on accept); specific IPv6 addresses don't.
+                    listener.DualMode = endpoint.Address.Equals(IPAddress.IPv6Any);
                 }
 
                 listener.Bind(endpoint);
@@ -193,7 +197,8 @@ public sealed class RelayServer : IAsyncDisposable
         var prelude = ClientPrelude.None;
         try
         {
-            if (settings.Dns.Mode == DnsMode.Sniff && context.DestinationHost is null &&
+            // Remote (fake-IP) DNS is not implemented yet; until it is, it also recovers hostnames by sniffing.
+            if (settings.Dns.Mode != DnsMode.Local && context.DestinationHost is null &&
                 (decision.Action == RuleActionType.Proxy || active.Rules.UsesHostCriteria))
             {
                 prelude = await ClientPrelude.ReadAsync(clientStream, TimeSpan.FromMilliseconds(settings.Dns.SniffTimeoutMs), cancellationToken).ConfigureAwait(false);

@@ -55,11 +55,26 @@ The relay accepts the connection, looks up the original destination by the peer 
 The user chooses the capture mode in config (`settings.capture.mode`).
 
 **Windows – `windivert` (default, kernel-level, catches everything)**
-- Uses the signed WinDivert driver (loaded dynamically, unmodified; LGPLv3).
-- `SOCKET`/`FLOW` layer (sniff mode) supplies PID ↔ flow mapping at `connect()` time; fall back to `GetExtendedTcpTable`/`GetExtendedUdpTable` by local port if the event hasn't arrived yet.
-- `NETWORK` layer rewrites outbound TCP SYNs of flows whose rule action is not `direct` into the local relay (NAT-style "reflect" technique, as in WinDivert's `streamdump` sample) and rewrites the replies back. Unmatched flows are reinjected untouched.
-- Always excluded from redirection: the service's own PID (otherwise the relay's upstream connections loop), connections to configured proxy endpoints, and loopback unless explicitly enabled.
-- `block` action: drop + RST (TCP) / drop (UDP).
+- Uses the signed WinDivert 2.2.2 driver (loaded dynamically, unmodified; LGPLv3). `build/WinDivert.targets`
+  downloads it (pinned version + SHA-256) and is imported by **executable** projects only (`proxynatord`); the files
+  flow to projects that reference it. Struct layouts and constants come from `windivert.h`; keep
+  `InteropLayoutTests` passing.
+- A sniffing `SOCKET`-layer handle records `connect`/`close` events (PID per local port + remote endpoint). The
+  packet thread falls back to `GetExtendedTcpTable` when the event hasn't arrived yet (it is asynchronous).
+- A `NETWORK`-layer handle diverts `tcp and ((outbound and !loopback) or (inbound and !loopback and tcp.DstPort ==
+  relayPort))`. `ReflectNat` (pure managed code, unit-tested on any OS): on a SYN, `RuleEngine.RequiresRelay`
+  decides; redirected client packets `A:pa → B:pb` become `B:pa → A:relay` and are injected *inbound*; relay replies
+  `A:relay → B:pa` become `B:pb → A:pa`. The relay therefore sees peer `B:pa`, which is the key registered in the
+  `OriginalDestinationTable`. Unmatched flows are reinjected untouched; inbound packets from the network to the relay
+  port are dropped. Checksums are recalculated with `WinDivertHelperCalcChecksums`.
+- The relay listens dual-mode on `[::]:<ephemeral>` (reflected packets arrive on the client's interface address).
+  An inbound Windows Firewall rule "Proxynator relay" is added for that port on start and removed on stop.
+- Connections whose owner cannot be determined (no socket event, not in the TCP table) are never redirected: one of
+  them could be the relay's own upstream connection, which a catch-all rule would loop back into the relay.
+- Always excluded from redirection: the service's own PID (otherwise the relay's upstream connections loop),
+  connections to configured proxy endpoints (resolved on every config change) and loopback (`proxyLoopback` is not
+  implemented yet and logs a warning).
+- `block` action: the connection is relayed and reset (TCP). UDP is not captured yet.
 
 **Windows – `injection` (user-mode, opt-in)**
 - Native hook DLL in `native/windows/hook` (C++, Microsoft Detours), built for **x64 and x86** so 32-bit targets work.
@@ -117,11 +132,30 @@ Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost
 
 ### IPC
 
-- gRPC (`.proto` contracts in `Proxynator.Ipc`), over a named pipe on Windows and a Unix domain socket on Linux.
-- Version the service (`proxynator.v1`). Additive changes only within a version.
-- Restrict access: pipe ACL = Administrators + SYSTEM (+ optional configured group); socket `0660` owned by `root:proxynator`. Anyone who can talk to the service can redirect traffic.
+- gRPC (`Protos/proxynator/v1/control.proto` in `Proxynator.Ipc`), served by Kestrel (HTTP/2) on the named pipe
+  `proxynator.v1` on Windows and the Unix socket `/run/proxynator/proxynator.sock` elsewhere. `--endpoint` or the
+  `PROXYNATOR_ENDPOINT` environment variable overrides it (tests use a private endpoint each).
+- Version the service (`proxynator.v1`). Additive changes only within a version; breaking changes go into `v2`
+  served side by side.
+- Restrict access: anyone who can talk to the service can redirect traffic. Pipe ACL = SYSTEM + Administrators + the
+  account running the service (in console mode that is the user who started it, so their CLI works without
+  elevation; as LocalSystem the CLI must run elevated). Unix socket mode `0660` (`root:proxynator` group in phase 5).
+- Configuration is exchanged as JSON text (the config file format is the single source of truth). `config validate`
+  runs locally in the CLI; `ApplyConfig` validates again in the service and can persist the file atomically.
 
-## Repository layout (target)
+### Service (`proxynatord`) and CLI (`proxynator`)
+
+- Startup: privilege check → load config (missing file = empty rule set; invalid file = refuse to start) → relay →
+  capture backend. If the backend cannot start (driver missing, unsupported mode) the service keeps running with
+  capture `FAILED`, so `status`/`doctor` can explain why; nothing is redirected in that state.
+- `--no-capture` runs the control API and relay without capturing (and without requiring privileges); used for
+  development on Linux and in the service tests.
+- Saved config: written atomically; a newly created `%ProgramData%\Proxynator` gets an Administrators/SYSTEM-only ACL,
+  on Unix the file is `0640`, because it can contain proxy passwords.
+- Exit codes: `proxynatord` 1 general, 2 insufficient privileges, 3 invalid configuration; `proxynator` 0 success,
+  1 failure, 2 service unreachable.
+
+## Repository layout
 
 ```
 src/
@@ -135,21 +169,27 @@ src/
     Sniffing/                        HostnameSniffer (TLS SNI, HTTP Host)
     Relay/                           RelayServer, IOriginalDestinationTable, ConnectionTracker
     Platform/                        ICaptureBackend, CaptureContext, IPrivilegeChecker
-  Proxynator.Platform.Windows/     WinDivert P/Invoke + capture, injection controller,
-                                   process tracking, admin check, Windows service glue
+  Proxynator.Platform.Windows/     WindowsPlatformModule, WinDivert interop + capture backend (Capture/,
+                                   Interop/, Packets/), process info with ancestors, admin check, firewall rule
   Proxynator.Platform.Linux/       (later) eBPF/nftables capture, preload controller, root check
-  Proxynator.Ipc/                  .proto contracts, generated client/server, transport helpers
-  Proxynator.Service/              proxynatord host: DI wiring, platform selection, service/systemd
-  Proxynator.Cli/                  proxynator CLI (thin IPC client)
+  Proxynator.Ipc/                  .proto contracts, generated client/server, ControlClientFactory, IpcEndpoint
+  Proxynator.Service/              proxynatord: ServiceHost (Kestrel on pipe/socket, Windows service, systemd),
+                                   ProxynatorEngine, ControlService (gRPC), platform selection
+  Proxynator.Cli/                  proxynator CLI (System.CommandLine; Commands.cs is testable with captured output)
   Proxynator.Gui/                  (later) Avalonia GUI (thin IPC client)
-native/
+build/
+  WinDivert.targets                pinned WinDivert download + verification, imported by executables
+native/                            (later)
   windows/hook/                    C++ Detours hook DLL (x64 + x86)
   linux/preload/                   (later) LD_PRELOAD .so
   linux/bpf/                       (later) eBPF programs
 tests/
-  Proxynator.Core.Tests/           Pure unit tests, run on both OSes
-  Proxynator.Platform.Windows.Tests/
-  Proxynator.IntegrationTests/     Need admin/root; tagged [Trait("Category","Integration")]
+  Proxynator.Core.Tests/           Pure unit tests, run on both OSes (Support/ has fake proxies, echo server)
+  Proxynator.Platform.Windows.Tests/  NAT, packet parsing, interop struct layouts; run on both OSes
+  Proxynator.Service.Tests/        In-process proxynatord + CLI over a real pipe/socket, fake platform module
+  Proxynator.IntegrationTests/     Real WinDivert capture with curl.exe; elevated Windows + internet only;
+                                   tagged [Trait("Category","Integration")], skipped elsewhere unless
+                                   PROXYNATOR_REQUIRE_INTEGRATION=1 (CI), which turns a skip into a failure
 schema/                            config JSON schema (keep in sync with the config model)
 samples/                           example configs (loaded by the tests, so they must stay valid)
 docs/                              design notes, ADRs (docs/adr/NNNN-title.md)
@@ -164,7 +204,8 @@ docs/                              design notes, ADRs (docs/adr/NNNN-title.md)
 - Interop: `LibraryImport` (source-generated), `SafeHandle` for native handles, no `DllImport` unless unavoidable. Keep code AOT/trim-compatible (no reflection-based serialization).
 - File-scoped namespaces, one public type per file, `async` all the way, `CancellationToken` on every async API, `System.IO.Pipelines`/`Socket` APIs on the hot path, avoid per-packet allocations (`ArrayPool`, `Span<T>`).
 - Logging via `Microsoft.Extensions.Logging` (Event Log/file on Windows, journald on Linux). Use structured logging; never log proxy credentials.
-- Native code: C++17, CMake, built in CI. Third-party binaries (WinDivert) are downloaded at build time with a pinned version and verified SHA-256, not committed.
+- Native code: C++17, CMake, built in CI. Third-party binaries (WinDivert) are downloaded at build time with a pinned
+  version and verified SHA-256 (into `.cache/`, git-ignored), not committed.
 - Tests: xUnit v3 (`using Xunit` is global). Every proxy protocol client is tested against the in-process fake
   proxy servers in `tests/Proxynator.Core.Tests/Support` (real SOCKS4/4a/5 and HTTP CONNECT servers on loopback).
   Network tests take a `TestTimeout.Token()` so they can never hang. The rule engine, validator and sniffer get
@@ -180,28 +221,43 @@ Requires the .NET 10 SDK (`global.json` pins the 10.0 feature band, rolling forw
 ```
 dotnet build Proxynator.sln -c Release
 dotnet test Proxynator.sln --filter "Category!=Integration"
-dotnet test Proxynator.sln --filter "Category=Integration"   # elevated shell / root only (none yet)
+dotnet test tests/Proxynator.IntegrationTests          # elevated Windows with internet access only
 ```
 
-Phase 2 adds:
+Run locally (elevated on Windows; on Linux only with `--no-capture` until phase 5):
 
 ```
-dotnet run --project src/Proxynator.Service -- --console --config ./samples/config.json
+dotnet run --project src/Proxynator.Service -- --config ./samples/config.json --verbose
 dotnet run --project src/Proxynator.Cli -- status
 ```
 
-CI (`.github/workflows/ci.yml`) builds and unit-tests in Release on `windows-latest` and `ubuntu-latest`. Later
-phases add the native hook DLL build (x64 + x86) and integration tests on Windows runners (which run as
-Administrator).
+On Linux, `-p:IncludeWinDivert=true` forces the WinDivert download (e.g. to check `build/WinDivert.targets`). A
+Windows publish (`dotnet publish src/Proxynator.Service -c Release -r win-x64 --self-contained`) can be produced from
+Linux too.
+
+CI (`.github/workflows/ci.yml`) builds and unit-tests in Release on `windows-latest` and `ubuntu-latest`, runs the
+WinDivert integration tests on the Windows runner (elevated) and uploads a self-contained `proxynator-win-x64`
+build. Later phases add the native hook DLL build (x64 + x86).
 
 Before pushing: build with zero warnings (warnings are errors) and run the unit tests. Network tests run in
-parallel, so run the suite a few times when touching the relay or proxy code to catch races.
+parallel, so run the suite a few times when touching the relay or proxy code to catch races. Code that only runs on
+Windows (WinDivert, Win32) is only exercised by CI's Windows job; check it after pushing.
+
+### Gotchas
+
+- `CA1416` does not see `OperatingSystem.IsWindows()` checks from inside lambdas: hoist the platform-specific call
+  into a method attributed `[SupportedOSPlatform]`/`[UnsupportedOSPlatform]` and call it under the check.
+- When a server resets a connection immediately, the client's `ConnectAsync` can itself fail with
+  `ConnectionReset` on Linux. Tests that expect a reset must accept that (see `IsRejectedByRelayAsync`).
+- WinDivert SOCKET/FLOW addresses are four host-order 32-bit words, most significant word last, IPv4 as
+  `::ffff:a.b.c.d` (`AddressWords`).
+- `pkill -f <pattern>` in a shell whose own command line contains the pattern kills that shell; use PID files.
 
 ## Roadmap
 
 - [x] Phase 0 — `README.md`, `CLAUDE.md`, license.
 - [x] Phase 1 — Solution scaffold, CI, Core: config model + schema + validation, rule engine, SOCKS4/4a/5 + HTTP CONNECT clients with auth, chain dialer, relay with hostname sniffing, `OriginalDestinationTable`. Fully unit-tested on both OSes.
-- [ ] Phase 2 — Windows `windivert` TCP capture, PID attribution, exclusions, privilege check, `proxynatord` (console + Windows service), gRPC IPC, basic CLI (`status`, `config load|validate`, `rules list`, `connections`, `doctor`).
+- [x] Phase 2 — Windows `windivert` TCP capture, PID attribution, exclusions, privilege check, `proxynatord` (console + Windows service), gRPC IPC, basic CLI (`status`, `config load|validate`, `rules list`, `connections`, `doctor`).
 - [ ] Phase 3 — DNS modes (`sniff`, `remote`), UDP via SOCKS5, QUIC blocking, child-process matching.
 - [ ] Phase 4 — Windows `injection` mode (Detours hook DLL x64/x86, `run`, `attach`, child propagation).
 - [ ] Phase 5 — Linux: `ebpf` + `nftables` capture, `preload` mode, systemd unit, `.deb` packaging for Ubuntu/Kali.

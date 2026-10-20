@@ -1,0 +1,163 @@
+// Control API between proxynatord and its clients (CLI, GUI).
+//
+// Versioning: this is proxynator.v1. Only additive, backwards-compatible changes are allowed within v1 (new fields
+// with new numbers, new RPCs, new enum values). Breaking changes go into a new package (proxynator.v2) served
+// side by side.
+
+syntax = "proto3";
+
+package proxynator.v1;
+
+option csharp_namespace = "Proxynator.Ipc.V1";
+
+import "google/protobuf/timestamp.proto";
+
+service Control {
+  // Service, capture and relay state.
+  rpc GetStatus (GetStatusRequest) returns (GetStatusResponse);
+
+  // The active configuration as JSON.
+  rpc GetConfig (GetConfigRequest) returns (GetConfigResponse);
+
+  // Validates and atomically applies a configuration; optionally saves it as the service's config file.
+  rpc ApplyConfig (ApplyConfigRequest) returns (ApplyConfigResponse);
+
+  // The active rules, in evaluation order.
+  rpc ListRules (ListRulesRequest) returns (ListRulesResponse);
+
+  // Currently relayed connections.
+  rpc ListConnections (ListConnectionsRequest) returns (ListConnectionsResponse);
+
+  // Streams connection opened/closed events until the client cancels.
+  rpc WatchConnections (WatchConnectionsRequest) returns (stream ConnectionEvent);
+
+  // Health checks for `proxynator doctor`.
+  rpc RunDiagnostics (RunDiagnosticsRequest) returns (RunDiagnosticsResponse);
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  string version = 1;
+  string platform = 2;
+  google.protobuf.Timestamp started_at = 3;
+  CaptureStatus capture = 4;
+  repeated string relay_endpoints = 5;
+  string config_path = 6;
+  int32 rule_count = 7;
+  int32 active_connections = 8;
+  bool privileged = 9;
+  int32 process_id = 10;
+}
+
+enum CaptureState {
+  CAPTURE_STATE_UNSPECIFIED = 0;
+  // Capture was disabled on purpose (--no-capture).
+  CAPTURE_STATE_DISABLED = 1;
+  CAPTURE_STATE_RUNNING = 2;
+  CAPTURE_STATE_FAILED = 3;
+  CAPTURE_STATE_STOPPED = 4;
+}
+
+message CaptureStatus {
+  string mode = 1;
+  CaptureState state = 2;
+  string detail = 3;
+}
+
+message GetConfigRequest {}
+
+message GetConfigResponse {
+  string json = 1;
+  string path = 2;
+}
+
+message ApplyConfigRequest {
+  string json = 1;
+  // Also write the configuration to the service's config file so it survives a restart.
+  bool persist = 2;
+}
+
+message ApplyConfigResponse {
+  bool applied = 1;
+  repeated ConfigError errors = 2;
+  bool persisted = 3;
+  string persist_error = 4;
+  // Set when a change only takes effect after restarting the service (e.g. the capture mode).
+  string restart_required_reason = 5;
+}
+
+message ConfigError {
+  string path = 1;
+  string message = 2;
+}
+
+message ListRulesRequest {}
+
+message ListRulesResponse {
+  repeated RuleSummary rules = 1;
+}
+
+message RuleSummary {
+  string name = 1;
+  bool enabled = 2;
+  // Human-readable criteria, e.g. "processes=test.exe; ports=80,443".
+  string match = 3;
+  // "proxy", "direct" or "block".
+  string action = 4;
+  string target = 5;
+  // The resolved hops, e.g. ["pivot", "burp"].
+  repeated string route = 6;
+}
+
+message ListConnectionsRequest {}
+
+message ListConnectionsResponse {
+  repeated Connection connections = 1;
+}
+
+message Connection {
+  int64 id = 1;
+  google.protobuf.Timestamp started_at = 2;
+  int32 process_id = 3;
+  string process_name = 4;
+  string process_path = 5;
+  // Address or hostname with port, e.g. "example.com:443".
+  string destination = 6;
+  string rule = 7;
+  string action = 8;
+  string route = 9;
+  int64 bytes_sent = 10;
+  int64 bytes_received = 11;
+}
+
+message WatchConnectionsRequest {}
+
+message ConnectionEvent {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_OPENED = 1;
+    KIND_CLOSED = 2;
+  }
+  Kind kind = 1;
+  Connection connection = 2;
+}
+
+message RunDiagnosticsRequest {}
+
+message RunDiagnosticsResponse {
+  repeated DiagnosticResult results = 1;
+}
+
+enum DiagnosticStatus {
+  DIAGNOSTIC_STATUS_UNSPECIFIED = 0;
+  DIAGNOSTIC_STATUS_OK = 1;
+  DIAGNOSTIC_STATUS_WARNING = 2;
+  DIAGNOSTIC_STATUS_ERROR = 3;
+}
+
+message DiagnosticResult {
+  string name = 1;
+  DiagnosticStatus status = 2;
+  string detail = 3;
+}

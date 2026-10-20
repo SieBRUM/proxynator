@@ -1,3 +1,4 @@
+using System.Net;
 using Proxynator.Core.Configuration;
 
 namespace Proxynator.Core.Platform;
@@ -11,6 +12,12 @@ public interface ICaptureBackend : IAsyncDisposable
 {
     /// <summary>The capture mode this backend implements.</summary>
     CaptureMode Mode { get; }
+
+    /// <summary>
+    /// Where the relay must listen for this backend (port 0 for any free port). The actual endpoints are passed back
+    /// in <see cref="CaptureContext.RelayEndpoints"/>.
+    /// </summary>
+    IReadOnlyList<IPEndPoint> RelayListenEndpoints { get; }
 
     /// <summary>Starts capturing.</summary>
     Task StartAsync(CaptureContext context, CancellationToken cancellationToken);
