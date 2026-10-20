@@ -2,25 +2,17 @@ using System.Security.Principal;
 
 namespace Proxynator.IntegrationTests;
 
+/// <summary>
+/// Tests for another operating system are skipped. On the right one, a missing requirement skips the test, unless
+/// PROXYNATOR_REQUIRE_INTEGRATION=1 (CI), which turns it into a failure so the tests can never pass silently.
+/// </summary>
 internal static class Requirements
 {
-    /// <summary>Skips the test unless running elevated on Windows (or fails, when CI requires these tests).</summary>
+    /// <summary>Windows, elevated (Administrator).</summary>
     public static void ElevatedWindows()
     {
-        string? missing = !OperatingSystem.IsWindows()
-            ? "Capture integration tests need Windows."
-            : !IsElevated() ? "Capture integration tests need an elevated (Administrator) process." : null;
-        if (missing is null)
-        {
-            return;
-        }
-
-        if (Environment.GetEnvironmentVariable("PROXYNATOR_REQUIRE_INTEGRATION") == "1")
-        {
-            Assert.Fail(missing + " PROXYNATOR_REQUIRE_INTEGRATION=1 is set, so this is an error.");
-        }
-
-        Assert.Skip(missing);
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows capture tests run on Windows.");
+        Require(IsElevated(), "Capture integration tests need an elevated (Administrator) process.");
     }
 
     /// <summary>Like <see cref="ElevatedWindows"/>, and the hook DLLs (built by build/build-native.ps1) must be present.</summary>
@@ -28,12 +20,27 @@ internal static class Requirements
     {
         ElevatedWindows();
         var missing = Platform.Windows.Injection.HookLibrary.Missing();
-        if (missing.Count == 0)
+        Require(missing.Count == 0, $"The hook DLLs are missing ({string.Join(", ", missing)}); build them with build/build-native.ps1.");
+    }
+
+    /// <summary>Linux, root, and the native parts (built by build/build-native.sh).</summary>
+    public static void RootLinux()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "Linux capture tests run on Linux.");
+        Require(Environment.IsPrivilegedProcess, "Linux capture integration tests need root (sudo).");
+        var missing = new[] { Platform.Linux.NativeFiles.BpfObject, Platform.Linux.NativeFiles.PreloadLibrary }
+            .Where(file => !File.Exists(Platform.Linux.NativeFiles.PathOf(file)))
+            .ToList();
+        Require(missing.Count == 0, $"The Linux capture parts are missing ({string.Join(", ", missing)}); build them with build/build-native.sh.");
+    }
+
+    private static void Require(bool condition, string message)
+    {
+        if (condition)
         {
             return;
         }
 
-        var message = $"The hook DLLs are missing ({string.Join(", ", missing)}); build them with build/build-native.ps1.";
         if (Environment.GetEnvironmentVariable("PROXYNATOR_REQUIRE_INTEGRATION") == "1")
         {
             Assert.Fail(message + " PROXYNATOR_REQUIRE_INTEGRATION=1 is set, so this is an error.");

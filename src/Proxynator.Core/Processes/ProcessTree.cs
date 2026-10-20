@@ -105,7 +105,7 @@ public sealed class ProcessTree(TimeProvider? timeProvider = null, TimeSpan? ret
                     break;
                 }
 
-                ancestors.Add(new ProcessInfo(parent.ProcessId, parent.Name, parent.ExecutablePath));
+                ancestors.Add(parent.ToInfo());
                 current = parent;
             }
         }
@@ -143,13 +143,15 @@ public sealed class ProcessTree(TimeProvider? timeProvider = null, TimeSpan? ret
         }
         else
         {
+            // Same process; on Linux exec() keeps PID and start time but changes the program.
             existing.ExitedAt = null;
+            existing.Record = record;
         }
     }
 
     private sealed class Entry(ProcessRecord record)
     {
-        public ProcessRecord Record { get; } = record;
+        public ProcessRecord Record { get; set; } = record;
 
         public DateTimeOffset? ExitedAt { get; set; }
     }

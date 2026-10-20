@@ -18,6 +18,9 @@ public sealed class OriginalDestinationTable(TimeProvider? timeProvider = null, 
     private readonly TimeSpan lifetime = entryLifetime ?? TimeSpan.FromSeconds(60);
     private int registrations;
 
+    /// <inheritdoc />
+    public IOriginalDestinationSource? ExternalSource { get; set; }
+
     /// <summary>The number of pending entries.</summary>
     public int Count => entries.Count;
 
@@ -41,6 +44,11 @@ public sealed class OriginalDestinationTable(TimeProvider? timeProvider = null, 
         {
             destination = entry.Destination;
             return true;
+        }
+
+        if (ExternalSource is { } source)
+        {
+            return source.TryTake(clientEndpoint.Normalize(), out destination);
         }
 
         destination = null;

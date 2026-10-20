@@ -25,6 +25,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Proxynator.Service.Tests", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Proxynator.IntegrationTests", "tests\Proxynator.IntegrationTests\Proxynator.IntegrationTests.csproj", "{A3CE1703-4CA7-4019-8EAF-58C46A49F7EA}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Proxynator.Platform.Linux", "src\Proxynator.Platform.Linux\Proxynator.Platform.Linux.csproj", "{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Proxynator.Platform.Linux.Tests", "tests\Proxynator.Platform.Linux.Tests\Proxynator.Platform.Linux.Tests.csproj", "{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -143,6 +147,30 @@ Global
 		{A3CE1703-4CA7-4019-8EAF-58C46A49F7EA}.Release|x64.Build.0 = Release|Any CPU
 		{A3CE1703-4CA7-4019-8EAF-58C46A49F7EA}.Release|x86.ActiveCfg = Release|Any CPU
 		{A3CE1703-4CA7-4019-8EAF-58C46A49F7EA}.Release|x86.Build.0 = Release|Any CPU
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}.Debug|x64.Build.0 = Debug|Any CPU
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}.Debug|x86.Build.0 = Debug|Any CPU
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}.Release|x64.ActiveCfg = Release|Any CPU
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}.Release|x64.Build.0 = Release|Any CPU
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}.Release|x86.ActiveCfg = Release|Any CPU
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30}.Release|x86.Build.0 = Release|Any CPU
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}.Debug|x64.Build.0 = Debug|Any CPU
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}.Debug|x86.Build.0 = Debug|Any CPU
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}.Release|x64.ActiveCfg = Release|Any CPU
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}.Release|x64.Build.0 = Release|Any CPU
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}.Release|x86.ActiveCfg = Release|Any CPU
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -157,5 +185,7 @@ Global
 		{F86C5B9E-C518-4604-A8B5-74F0FB06BB5D} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{5FD94018-92E8-4BE9-B618-A0FEE891C6D1} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{A3CE1703-4CA7-4019-8EAF-58C46A49F7EA} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{E593CB2D-4779-48FA-A6B5-10CEB3C85D30} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{E4E4E89F-19F6-45BE-B8D3-D36841C529CB} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

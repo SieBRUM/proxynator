@@ -8,4 +8,10 @@ public sealed record ProcessInfo(int ProcessId, string Name, string? ExecutableP
 {
     /// <summary>Parent, grandparent, ... of the process, nearest first. Used for child-process rules.</summary>
     public IReadOnlyList<ProcessInfo> Ancestors { get; init; } = [];
+
+    /// <summary>
+    /// The script an interpreter runs (e.g. <c>/home/u/.local/bin/nxc</c> for <c>python3 /home/u/.local/bin/nxc</c>),
+    /// when known. Process rules match it as well as the executable.
+    /// </summary>
+    public string? ScriptPath { get; init; }
 }

@@ -89,10 +89,19 @@ internal static class ServiceHost
         webHost.ConfigureKestrel(k => k.ListenUnixSocket(endpoint, l => l.Protocols = HttpProtocols.Http2));
     }
 
-    /// <summary>Owner and group only: whoever can use the socket controls where traffic goes.</summary>
+    /// <summary>
+    /// Owner and group only: whoever can use the socket controls where traffic goes. On Linux the group is
+    /// <c>proxynator</c> when it exists (the package creates it), so its members can use the CLI without sudo.
+    /// </summary>
     [UnsupportedOSPlatform("windows")]
-    private static void RestrictSocket(string path) =>
+    private static void RestrictSocket(string path)
+    {
         File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite);
+        if (OperatingSystem.IsLinux())
+        {
+            Platform.Linux.UnixGroups.TryGiveToGroup(path);
+        }
+    }
 
     /// <summary>
     /// SYSTEM, Administrators and the account running the service. In console mode that is the user who started it,

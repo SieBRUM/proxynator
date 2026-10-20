@@ -31,7 +31,10 @@ internal sealed class IntegrationService : IAsyncDisposable
         var options = new ServiceOptions
         {
             ConfigPath = configPath,
-            Endpoint = $"proxynator-it-{Guid.NewGuid():N}",
+            // A pipe name on Windows, a socket path elsewhere (the hook endpoint is derived from it).
+            Endpoint = OperatingSystem.IsWindows()
+                ? $"proxynator-it-{Guid.NewGuid():N}"
+                : Path.Combine(directory, "proxynator.sock"),
             Verbose = true,
         };
 

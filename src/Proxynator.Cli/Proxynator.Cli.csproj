@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Proxynator.Core\Proxynator.Core.csproj" />
     <ProjectReference Include="..\Proxynator.Ipc\Proxynator.Ipc.csproj" />
+    <ProjectReference Include="..\Proxynator.Platform.Linux\Proxynator.Platform.Linux.csproj" />
     <ProjectReference Include="..\Proxynator.Platform.Windows\Proxynator.Platform.Windows.csproj" />
   </ItemGroup>
 
@@ -20,7 +21,7 @@
     <InternalsVisibleTo Include="Proxynator.Service.Tests" />
   </ItemGroup>
 
-  <!-- The injection mode's hook DLLs (when built, see build/build-native.ps1). -->
-  <Import Project="..\..\build\NativeHook.targets" />
+  <!-- Native capture parts (hook DLLs, eBPF object, preload library) when built: build/build-native.ps1 and .sh. -->
+  <Import Project="..\..\build\NativeArtifacts.targets" />
 
 </Project>

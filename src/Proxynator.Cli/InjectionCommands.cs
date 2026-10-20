@@ -1,22 +1,33 @@
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using Proxynator.Ipc;
+using Proxynator.Platform.Linux;
+using Proxynator.Platform.Linux.Preload;
 using Proxynator.Platform.Windows.Injection;
 
 namespace Proxynator.Cli;
 
-/// <summary><c>proxynator run</c> and <c>proxynator attach</c>: user-mode capture of chosen processes (injection mode).</summary>
+/// <summary>
+/// <c>proxynator run</c> and <c>proxynator attach</c>: user-mode capture of chosen processes (Windows injection mode,
+/// Linux preload mode).
+/// </summary>
 internal sealed class InjectionCommands(string endpoint, TextWriter output, TextWriter error)
 {
     /// <summary>Starts <paramref name="command"/> with the hook DLL and, unless <paramref name="detach"/>, waits for it and returns its exit code.</summary>
     public async Task<int> RunAsync(string command, IReadOnlyList<string> arguments, bool detach)
     {
-        if (!OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows())
         {
-            error.WriteLine("'proxynator run' is only available on Windows for now (the Linux preload mode is planned).");
-            return ExitCodes.Failure;
+            return await RunOnWindowsAsync(command, arguments, detach).ConfigureAwait(false);
         }
 
-        return await RunOnWindowsAsync(command, arguments, detach).ConfigureAwait(false);
+        if (OperatingSystem.IsLinux())
+        {
+            return await RunOnLinuxAsync(command, arguments, detach).ConfigureAwait(false);
+        }
+
+        error.WriteLine("'proxynator run' is available on Windows and Linux.");
+        return ExitCodes.Failure;
     }
 
     /// <summary>Loads the hook DLL into the running process <paramref name="processId"/>.</summary>
@@ -24,7 +35,8 @@ internal sealed class InjectionCommands(string endpoint, TextWriter output, Text
     {
         if (!OperatingSystem.IsWindows())
         {
-            error.WriteLine("'proxynator attach' is only available on Windows for now.");
+            error.WriteLine("'proxynator attach' is only available on Windows: a library cannot be preloaded into a running Linux process.");
+            error.WriteLine("On Linux, start the program with 'proxynator run', or use the ebpf capture mode, which catches running processes too.");
             return ExitCodes.Failure;
         }
 
@@ -89,6 +101,57 @@ internal sealed class InjectionCommands(string endpoint, TextWriter output, Text
             try
             {
                 return await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                Console.CancelKeyPress -= ignore;
+            }
+        }
+    }
+
+    [SupportedOSPlatform("linux")]
+    private async Task<int> RunOnLinuxAsync(string command, IReadOnlyList<string> arguments, bool detach)
+    {
+        var hookSocket = IpcEndpoint.HookEndpoint(endpoint);
+        if (!PreloadLauncher.IsServing(hookSocket))
+        {
+            error.WriteLine($"proxynatord is not accepting hooked processes at {hookSocket}.");
+            error.WriteLine("Set \"settings.capture.mode\" to \"preload\" in the configuration and (re)start proxynatord. Check with 'proxynator status'.");
+            return ExitCodes.ServiceUnreachable;
+        }
+
+        if (!File.Exists(NativeFiles.PathOf(NativeFiles.PreloadLibrary)))
+        {
+            error.WriteLine($"{NativeFiles.PathOf(NativeFiles.PreloadLibrary)} is missing; build it with build/build-native.sh.");
+            return ExitCodes.Failure;
+        }
+
+        Process process;
+        try
+        {
+            process = Process.Start(PreloadLauncher.CreateStartInfo(command, arguments, hookSocket, Environment.GetEnvironmentVariable("LD_PRELOAD")))!;
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            error.WriteLine($"Cannot start '{command}': {ex.Message}");
+            return ExitCodes.Failure;
+        }
+
+        using (process)
+        {
+            error.WriteLine($"proxynator: started {command} (pid {process.Id}); its connections follow the proxynatord rules.");
+            if (detach)
+            {
+                return ExitCodes.Success;
+            }
+
+            // Ctrl+C reaches the child through the terminal's process group; keep waiting for its exit code.
+            ConsoleCancelEventHandler ignore = (_, e) => e.Cancel = true;
+            Console.CancelKeyPress += ignore;
+            try
+            {
+                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                return process.ExitCode;
             }
             finally
             {

@@ -1,4 +1,5 @@
 using Proxynator.Core.Configuration;
+using Proxynator.Core.Processes;
 using Proxynator.Core.Proxies;
 
 namespace Proxynator.Core.Rules;
@@ -43,6 +44,14 @@ public sealed class RuleEngine
 
         return RuleDecision.ImplicitDirect;
     }
+
+    /// <summary>
+    /// Whether any rule with a non-direct action could apply to connections of <paramref name="process"/>, judging
+    /// by process criteria only. Kernel-level backends that classify processes up front use it: when it is false,
+    /// none of the process's connections need the relay.
+    /// </summary>
+    public bool MayRelay(ProcessInfo? process) =>
+        rules.Any(rule => rule.Decision.Action != RuleActionType.Direct && rule.MatchesProcess(process));
 
     /// <summary>
     /// Decides whether a capture backend must hand a new connection to the relay. The hostname may still be unknown

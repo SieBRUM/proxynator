@@ -202,7 +202,7 @@ internal sealed class Commands(string endpoint, TextWriter output, TextWriter er
             error.WriteLine($"Cannot reach proxynatord at {IpcEndpoint.Describe(endpoint)}. Is it running?");
             error.WriteLine(OperatingSystem.IsWindows()
                 ? "Start it from an elevated prompt (e.g. 'proxynatord --config config.json'). When it runs as a Windows service, run this command elevated too."
-                : "Start it with 'sudo proxynatord --no-capture' (Linux capture is not implemented yet).");
+                : "Start it with 'sudo systemctl start proxynatord' (package install) or 'sudo proxynatord --config config.json'. As a service, the CLI needs root or membership of the 'proxynator' group.");
             return ExitCodes.ServiceUnreachable;
         }
         catch (RpcException ex)

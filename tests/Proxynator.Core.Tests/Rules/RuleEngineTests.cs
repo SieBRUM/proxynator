@@ -151,4 +151,41 @@ public class RuleEngineTests
         Assert.False(engine.RequiresRelay(Connection(Other)));
         Assert.False(engine.RequiresRelay(Connection(Test3, host: "cdn.example.com")));
     }
+
+    [Fact]
+    public void Process_candidacy_ignores_destination_criteria()
+    {
+        var engine = Engine(
+            Configs.Rule("direct for test", RuleActionType.Direct, match: new RuleMatch { Processes = ["test3.exe"] }),
+            Configs.Rule("test web", RuleActionType.Proxy, "burp", new RuleMatch { Processes = ["test.exe"], Ports = ["443"] }),
+            Configs.Rule("children", RuleActionType.Block, match: new RuleMatch { Processes = ["launcher"], IncludeChildren = true }));
+
+        Assert.True(engine.MayRelay(Test));
+        Assert.False(engine.MayRelay(Test3)); // only a direct rule applies
+        Assert.False(engine.MayRelay(Other));
+        Assert.True(engine.MayRelay(Other with { Ancestors = [new ProcessInfo(5, "launcher", null)] }));
+        Assert.False(engine.MayRelay(null));
+    }
+
+    [Fact]
+    public void Rules_without_process_criteria_make_every_process_a_candidate()
+    {
+        var engine = Engine(Configs.Rule("web", RuleActionType.Proxy, "burp", new RuleMatch { Ports = ["443"] }));
+
+        Assert.True(engine.MayRelay(Other));
+        Assert.True(engine.MayRelay(null));
+    }
+
+    [Theory]
+    [InlineData("nxc", true)]
+    [InlineData("*/.local/bin/nxc", true)]
+    [InlineData("python3", true)]
+    [InlineData("roadtx", false)]
+    public void Scripts_run_by_an_interpreter_match_by_name_and_path(string pattern, bool matches)
+    {
+        var engine = Engine(Configs.Rule("tool", RuleActionType.Proxy, "socks", new RuleMatch { Processes = [pattern] }));
+        var python = new ProcessInfo(7, "python3", "/usr/bin/python3.12") { ScriptPath = "/home/u/.local/bin/nxc" };
+
+        Assert.Equal(matches, engine.Evaluate(Connection(python)).Action == RuleActionType.Proxy);
+    }
 }

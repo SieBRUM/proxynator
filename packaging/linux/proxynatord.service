@@ -1,0 +1,16 @@
+[Unit]
+Description=Proxynator traffic redirector (proxynatord)
+Documentation=https://github.com/SieBRUM/proxynator
+After=network.target
+
+[Service]
+Type=notify
+ExecStart=/opt/proxynator/proxynatord --config /etc/proxynator/config.json
+Restart=on-failure
+RestartSec=2
+# /run/proxynator: the control socket (root:proxynator 0660) and the preload mode's hook socket.
+RuntimeDirectory=proxynator
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

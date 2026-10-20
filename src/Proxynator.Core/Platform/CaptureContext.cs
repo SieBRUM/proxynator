@@ -30,4 +30,10 @@ public sealed record CaptureContext(
     /// path elsewhere. Null when the service has no hook endpoint.
     /// </summary>
     public string? HookEndpoint { get; init; }
+
+    /// <summary>
+    /// The DNS servers the service itself uses (it is never captured). Backends that forward the DNS queries of
+    /// captured programs (remote DNS mode) send names they do not fake there.
+    /// </summary>
+    public IReadOnlyList<IPEndPoint> DnsServers { get; init; } = [];
 }

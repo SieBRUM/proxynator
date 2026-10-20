@@ -7,14 +7,14 @@ using Proxynator.Core.Processes;
 namespace Proxynator.Service;
 
 /// <summary>
-/// Used on platforms without a capture implementation yet (Linux until roadmap phase 5). The service still runs with
-/// <c>--no-capture</c>, which keeps the control API and relay usable for development.
+/// Used on platforms without a capture implementation (neither Windows nor Linux, e.g. macOS for development). The
+/// service still runs with <c>--no-capture</c>, which keeps the control API and relay usable.
 /// </summary>
 internal sealed class FallbackPlatformModule : IPlatformModule, IPrivilegeChecker, IProcessInfoProvider
 {
     public string Name => RuntimeInformation.OSDescription;
 
-    public CaptureMode DefaultCaptureMode => OperatingSystem.IsLinux() ? CaptureMode.Ebpf : CaptureMode.Auto;
+    public CaptureMode DefaultCaptureMode => CaptureMode.Auto;
 
     public IPrivilegeChecker PrivilegeChecker => this;
 
@@ -23,7 +23,7 @@ internal sealed class FallbackPlatformModule : IPlatformModule, IPrivilegeChecke
     public bool Supports(CaptureMode mode) => false;
 
     public ICaptureBackend CreateCaptureBackend(CaptureMode mode, ILoggerFactory loggerFactory) =>
-        throw new NotSupportedException($"Traffic capture is not implemented on {Name} yet (Linux support is roadmap phase 5). Start proxynatord with --no-capture to run without capture.");
+        throw new NotSupportedException($"Traffic capture is not available on {Name}. Start proxynatord with --no-capture to run without capture.");
 
     public PrivilegeCheckResult Check() => Environment.IsPrivilegedProcess
         ? new PrivilegeCheckResult(true, "Running as root.")
@@ -35,6 +35,6 @@ internal sealed class FallbackPlatformModule : IPlatformModule, IPrivilegeChecke
     {
         var privileges = Check();
         yield return new DiagnosticResult("Privileges", privileges.IsSufficient ? DiagnosticStatus.Ok : DiagnosticStatus.Warning, privileges.Description);
-        yield return new DiagnosticResult("Capture support", DiagnosticStatus.Warning, $"Traffic capture is not implemented on {Name} yet (roadmap phase 5).");
+        yield return new DiagnosticResult("Capture support", DiagnosticStatus.Warning, $"Traffic capture is not available on {Name}.");
     }
 }

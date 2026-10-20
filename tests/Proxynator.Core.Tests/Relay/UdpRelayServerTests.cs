@@ -111,6 +111,12 @@ public sealed class UdpRelayServerTests : IAsyncLifetime
         Assert.Empty(socks.Requests);
 
         var session = Assert.Single(tracker.GetActive());
+        var ct = TestTimeout.Token();
+        while (session.BytesReceived < 10)
+        {
+            await Task.Delay(10, ct); // counted just after the reply went out
+        }
+
         Assert.Equal((TransportProtocol.Udp, 10L, 10L), (session.Context.Protocol, session.BytesSent, session.BytesReceived));
     }
 

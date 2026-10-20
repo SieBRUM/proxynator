@@ -17,4 +17,10 @@ public interface IOriginalDestinationTable
 
     /// <summary>Removes the entry for <paramref name="clientEndpoint"/> without using it (e.g. the connect failed).</summary>
     bool Remove(IPEndPoint clientEndpoint);
+
+    /// <summary>
+    /// Consulted by <see cref="TryTake"/> for connections nobody registered: kernel-level backends that record
+    /// original destinations themselves (e.g. in a BPF map) plug in here.
+    /// </summary>
+    IOriginalDestinationSource? ExternalSource { get; set; }
 }

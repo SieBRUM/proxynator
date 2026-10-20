@@ -37,6 +37,14 @@ jobs:
         shell: pwsh
         run: ./build/build-native.ps1
 
+      # The Linux capture parts (eBPF programs, LD_PRELOAD library). Built first: the .NET build copies them.
+      - name: Build Linux capture parts
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang llvm libbpf-dev
+          ./build/build-native.sh
+
       - name: Restore
         run: dotnet restore Proxynator.sln
 
@@ -60,6 +68,29 @@ jobs:
         env:
           PROXYNATOR_REQUIRE_INTEGRATION: '1'
         run: dotnet test tests/Proxynator.IntegrationTests -c Release --no-build --logger "trx;LogFileName=integration.trx" --logger "console;verbosity=detailed" --results-directory TestResults
+
+      # A self-contained build packaged as a .deb for Ubuntu and Kali (proxynatord, proxynator, the eBPF object,
+      # the preload library, a systemd unit and a default configuration).
+      - name: Build Debian package
+        if: runner.os == 'Linux'
+        run: |
+          dotnet publish src/Proxynator.Service -c Release -r linux-x64 --self-contained -o publish/linux-x64
+          dotnet publish src/Proxynator.Cli -c Release -r linux-x64 --self-contained -o publish/linux-x64
+          ./build/package-deb.sh publish/linux-x64 0.1.0 publish
+
+      - name: Upload Debian package
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxynator-linux-x64-deb
+          path: publish/*.deb
+
+      # Real traffic through the eBPF programs and the preload library (curl, sh, python3). Needs root; the
+      # variable turns a skip into a failure. Runs last, as root, so it cannot leave root-owned files behind for
+      # the other steps.
+      - name: Integration tests (eBPF, preload)
+        if: runner.os == 'Linux'
+        run: sudo -E env "PATH=$PATH" "DOTNET_ROOT=${DOTNET_ROOT:-}" PROXYNATOR_REQUIRE_INTEGRATION=1 dotnet test tests/Proxynator.IntegrationTests -c Release --no-build --logger "trx;LogFileName=integration.trx" --logger "console;verbosity=detailed" --results-directory TestResults
 
       - name: Upload test results
         if: always()

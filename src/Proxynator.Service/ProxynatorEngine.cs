@@ -188,7 +188,7 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
 
         results.Add(CaptureState switch
         {
-            CaptureState.Running => new DiagnosticResult("Capture", DiagnosticStatus.Ok, $"{CaptureMode} capture is running."),
+            CaptureState.Running => new DiagnosticResult("Capture", DiagnosticStatus.Ok, $"{CaptureMode?.ToString().ToLowerInvariant()} capture is running."),
             CaptureState.Disabled => new DiagnosticResult("Capture", DiagnosticStatus.Warning, CaptureDetail),
             _ => new DiagnosticResult("Capture", DiagnosticStatus.Error, CaptureDetail),
         });
@@ -279,10 +279,11 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
                 UdpRelayEndpoints = UdpRelay!.LocalEndpoints,
                 FakeIps = FakeIps,
                 HookEndpoint = Ipc.IpcEndpoint.HookEndpoint(options.Endpoint),
+                DnsServers = Resolver.Upstream.Servers,
             };
             await capture!.StartAsync(context, cancellationToken).ConfigureAwait(false);
             CaptureState = CaptureState.Running;
-            CaptureDetail = $"{CaptureMode} capture is running.";
+            CaptureDetail = $"{CaptureMode?.ToString().ToLowerInvariant()} capture is running.";
         }
         catch (Exception ex) when (ex is InvalidOperationException or DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/SieBRUM/proxynator/main/schema/config.schema.json",
+  "version": 1,
+  "settings": {
+    // "ebpf": the kernel captures matching programs machine-wide. "preload": only programs started with
+    // 'proxynator run'. Changing it needs 'sudo systemctl restart proxynatord'.
+    "capture": { "mode": "ebpf" },
+    "dns": { "mode": "sniff" }
+  },
+  "proxies": [],
+  "rules": []
+}

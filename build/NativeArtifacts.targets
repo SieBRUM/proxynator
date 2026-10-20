@@ -1,0 +1,32 @@
+<Project>
+  <!--
+    Copies the native capture parts next to the application when they have been built:
+    - Windows injection mode: proxynator-hook64.dll / proxynator-hook32.dll (build/build-native.ps1)
+    - Linux ebpf mode: proxynator.bpf.o; Linux preload mode: libproxynator-preload.so (build/build-native.sh)
+    They are built into artifacts/native/<rid>. Import this file in executable projects; the files flow to projects
+    that reference them. Without them everything still builds; the modes that need them report them missing
+    (proxynator doctor).
+  -->
+  <PropertyGroup>
+    <NativeArtifactsDir>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'artifacts', 'native'))</NativeArtifactsDir>
+    <NativeHook64>$(NativeArtifactsDir)win-x64\proxynator-hook64.dll</NativeHook64>
+    <NativeHook32>$(NativeArtifactsDir)win-x86\proxynator-hook32.dll</NativeHook32>
+    <NativeBpfObject>$(NativeArtifactsDir)linux-x64/proxynator.bpf.o</NativeBpfObject>
+    <NativePreload>$(NativeArtifactsDir)linux-x64/libproxynator-preload.so</NativePreload>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(NativeHook64)" Link="proxynator-hook64.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Condition="Exists('$(NativeHook64)')" />
+    <None Include="$(NativeHook32)" Link="proxynator-hook32.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Condition="Exists('$(NativeHook32)')" />
+    <None Include="$(NativeBpfObject)" Link="proxynator.bpf.o" CopyToOutputDirectory="PreserveNewest" Visible="false" Condition="Exists('$(NativeBpfObject)')" />
+    <None Include="$(NativePreload)" Link="libproxynator-preload.so" CopyToOutputDirectory="PreserveNewest" Visible="false" Condition="Exists('$(NativePreload)')" />
+  </ItemGroup>
+
+  <Target Name="ReportMissingNativeHook" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT' and (!Exists('$(NativeHook64)') or !Exists('$(NativeHook32)'))">
+    <Message Importance="high" Text="$(MSBuildProjectName): the hook DLLs for the injection capture mode are not built (run build/build-native.ps1); the windivert mode works without them." />
+  </Target>
+
+  <Target Name="ReportMissingLinuxNative" BeforeTargets="Build" Condition="'$(OS)' != 'Windows_NT' and (!Exists('$(NativeBpfObject)') or !Exists('$(NativePreload)'))">
+    <Message Importance="high" Text="$(MSBuildProjectName): the Linux capture parts are not built (run build/build-native.sh); the ebpf and preload modes need them." />
+  </Target>
+</Project>

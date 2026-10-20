@@ -1,3 +1,4 @@
+using Proxynator.Core.Processes;
 using Proxynator.Core.Configuration;
 using Proxynator.Core.Net;
 using Proxynator.Core.Proxies;
@@ -55,14 +56,17 @@ internal sealed class CompiledRule
     public bool MatchesHost(string? host) =>
         hosts.Length == 0 || (host is not null && hosts.Any(h => h.IsMatch(host)));
 
-    private bool MatchesProcess(ConnectionContext context)
+    private bool MatchesProcess(ConnectionContext context) => MatchesProcess(context.Process);
+
+    /// <summary>Checks only the process criteria (name/path, children).</summary>
+    public bool MatchesProcess(ProcessInfo? process)
     {
         if (processes.Length == 0)
         {
             return true;
         }
 
-        if (context.Process is not { } process)
+        if (process is null)
         {
             return false;
         }
