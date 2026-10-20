@@ -158,15 +158,15 @@ public class ReflectNatTests
     }
 
     [Fact]
-    public void Non_tcp_and_fragments_pass_through()
+    public void Other_protocols_and_fragments_pass_through()
     {
         var nat = Nat();
-        var udp = Tcp(Client, 1, Server, 53, 0);
-        udp[9] = 17;
+        var icmp = Tcp(Client, 1, Server, 53, 0);
+        icmp[9] = 1;
         var fragment = Tcp(Client, 50009, Server, 443, Syn);
         fragment[6] = 0x20; // more fragments
 
-        Assert.Equal(NatVerdict.PassThrough, nat.Process(udp, Decide(true)));
+        Assert.Equal(NatVerdict.PassThrough, nat.Process(icmp, Decide(true)));
         Assert.Equal(NatVerdict.PassThrough, nat.Process(fragment, Decide(true)));
         Assert.Equal(NatVerdict.PassThrough, nat.Process(new byte[10], Decide(true)));
         Assert.Empty(attempts);

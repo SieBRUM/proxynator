@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
 using Proxynator.Core.Configuration;
+using Proxynator.Core.NameResolution;
 using Proxynator.Core.Net;
 using Proxynator.Core.Platform;
 using Proxynator.Core.Relay;
@@ -31,6 +32,14 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
 
     public OriginalDestinationTable Destinations { get; } = new();
 
+    public OriginalDestinationTable UdpDestinations { get; } = new();
+
+    public FakeIpPool FakeIps { get; private set; } = null!;
+
+    public ModeAwareResolver Resolver { get; private set; } = null!;
+
+    public UdpRelayServer? UdpRelay { get; private set; }
+
     public ConnectionTracker Tracker { get; } = new();
 
     public RelayServer? Relay { get; private set; }
@@ -57,6 +66,10 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
         }
 
         Configuration = new ConfigurationStore(await LoadInitialConfigurationAsync(cancellationToken).ConfigureAwait(false));
+        FakeIps = new FakeIpPool(AddressRange.TryParse(Configuration.Current.Settings.Dns.FakeIpRange, out var fakeRange)
+            ? fakeRange
+            : throw new InvalidOperationException("The validated fake-IP range did not parse."));
+        Resolver = new ModeAwareResolver(Configuration, new UpstreamDnsResolver(UpstreamDnsResolver.DiscoverSystemServers(FakeIps.Range)));
 
         if (options.NoCapture)
         {
@@ -68,8 +81,14 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
             CreateCaptureBackend();
         }
 
-        Relay = new RelayServer(Configuration, Destinations, platform.ProcessInfo, Tracker, loggerFactory.CreateLogger<RelayServer>());
-        Relay.Start(capture?.RelayListenEndpoints ?? [new IPEndPoint(IPAddress.Loopback, 0)]);
+        var listenEndpoints = capture?.RelayListenEndpoints ?? [new IPEndPoint(IPAddress.Loopback, 0)];
+        Relay = new RelayServer(
+            Configuration, Destinations, platform.ProcessInfo, Tracker, loggerFactory.CreateLogger<RelayServer>(), fakeIps: FakeIps, resolver: Resolver);
+        Relay.Start(listenEndpoints);
+        UdpRelay = new UdpRelayServer(
+            Configuration, UdpDestinations, platform.ProcessInfo, Tracker, loggerFactory.CreateLogger<UdpRelayServer>(),
+            FakeIps, Resolver, new TcpConnector(resolver: Resolver));
+        UdpRelay.Start(listenEndpoints);
 
         if (capture is not null)
         {
@@ -87,6 +106,11 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
         }
 
         CaptureState = CaptureState.Stopped;
+        if (UdpRelay is not null)
+        {
+            await UdpRelay.DisposeAsync().ConfigureAwait(false);
+        }
+
         if (Relay is not null)
         {
             await Relay.DisposeAsync().ConfigureAwait(false);
@@ -155,9 +179,17 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
             _ => new DiagnosticResult("Capture", DiagnosticStatus.Error, CaptureDetail),
         });
 
-        results.Add(Relay is { LocalEndpoints.Count: > 0 }
-            ? new DiagnosticResult("Relay", DiagnosticStatus.Ok, $"Listening on {string.Join(", ", Relay.LocalEndpoints)}.")
+        results.Add(Relay is { LocalEndpoints.Count: > 0 } && UdpRelay is { LocalEndpoints.Count: > 0 }
+            ? new DiagnosticResult("Relay", DiagnosticStatus.Ok, $"TCP on {string.Join(", ", Relay.LocalEndpoints)}, UDP on {string.Join(", ", UdpRelay.LocalEndpoints)}.")
             : new DiagnosticResult("Relay", DiagnosticStatus.Error, "The relay is not listening."));
+
+        if (active.Settings.Dns.Mode == DnsMode.Remote)
+        {
+            var servers = Resolver.Upstream.Servers;
+            results.Add(servers.Count > 0
+                ? new DiagnosticResult("Remote DNS", DiagnosticStatus.Ok, $"Fake addresses from {FakeIps.Range} ({FakeIps.Count} name(s) mapped); the service resolves through {string.Join(", ", servers)}.")
+                : new DiagnosticResult("Remote DNS", DiagnosticStatus.Warning, "No upstream DNS servers were found, so the service's own lookups (direct connections to faked names) may fail."));
+        }
 
         if (active.Config.Rules.Count == 0)
         {
@@ -227,9 +259,13 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
     {
         try
         {
-            await capture!.StartAsync(
-                new CaptureContext(Configuration, Destinations, Relay!.LocalEndpoints, Environment.ProcessId),
-                cancellationToken).ConfigureAwait(false);
+            var context = new CaptureContext(Configuration, Destinations, Relay!.LocalEndpoints, Environment.ProcessId)
+            {
+                UdpDestinations = UdpDestinations,
+                UdpRelayEndpoints = UdpRelay!.LocalEndpoints,
+                FakeIps = FakeIps,
+            };
+            await capture!.StartAsync(context, cancellationToken).ConfigureAwait(false);
             CaptureState = CaptureState.Running;
             CaptureDetail = $"{CaptureMode} capture is running.";
         }
@@ -256,8 +292,13 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
         }
 
         var requested = config.Settings.Capture.Mode == Core.Configuration.CaptureMode.Auto ? platform.DefaultCaptureMode : config.Settings.Capture.Mode;
-        return requested != CaptureMode
-            ? $"The capture mode changed from '{CaptureMode}' to '{requested}'; restart proxynatord to switch."
+        if (requested != CaptureMode)
+        {
+            return $"The capture mode changed from '{CaptureMode}' to '{requested}'; restart proxynatord to switch.";
+        }
+
+        return AddressRange.TryParse(config.Settings.Dns.FakeIpRange, out var range) && range.ToString() != FakeIps.Range.ToString()
+            ? $"The fake-IP range changed to {range}; restart proxynatord to use it."
             : null;
     }
 

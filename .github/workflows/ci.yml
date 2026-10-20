@@ -40,6 +40,12 @@ jobs:
       - name: Unit tests
         run: dotnet test Proxynator.sln -c Release --no-build --filter "Category!=Integration" --logger trx --results-directory TestResults
 
+      # The integration tests build a venv to reproduce how pipx tools (console-script launcher -> python.exe) run.
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Windows'
+        with:
+          python-version: '3.12'
+
       # Real traffic through the WinDivert capture backend. GitHub's Windows runners are elevated; the variable
       # turns a skipped test (no admin / not Windows) into a failure so this can never pass silently.
       - name: Integration tests (WinDivert)

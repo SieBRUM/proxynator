@@ -72,7 +72,8 @@ public sealed partial class WinDivertCaptureBackend : ICaptureBackend
         this.context = context;
         ownProcessId = context.ServiceProcessId;
         var relayPort = context.RelayEndpoints[0].Port;
-        nat = new ReflectNat(relayPort);
+        var udpRelayPort = context.UdpDestinations is not null && context.UdpRelayEndpoints.Count > 0 ? context.UdpRelayEndpoints[0].Port : 0;
+        nat = new ReflectNat(relayPort, udpRelayPort);
 
         await RefreshExclusionsAsync(context.Configuration.Current, cancellationToken).ConfigureAwait(false);
         context.Configuration.Changed += OnConfigurationChanged;
@@ -81,12 +82,15 @@ public sealed partial class WinDivertCaptureBackend : ICaptureBackend
             Log.LoopbackNotSupported(logger);
         }
 
-        firewall.AllowRelayPort(relayPort);
+        firewall.AllowRelayPorts(relayPort, udpRelayPort);
+        FlushDnsCache();
 
-        socketHandle = Open("tcp and (event == CONNECT or event == CLOSE)", WinDivertLayer.Socket, WinDivertFlags.Sniff | WinDivertFlags.RecvOnly);
-        var networkFilter = string.Create(
-            CultureInfo.InvariantCulture,
-            $"tcp and ((outbound and !loopback) or (inbound and !loopback and tcp.DstPort == {relayPort}))");
+        socketHandle = Open("(tcp or udp) and (event == CONNECT or event == CLOSE)", WinDivertLayer.Socket, WinDivertFlags.Sniff | WinDivertFlags.RecvOnly);
+        var networkFilter = udpRelayPort == 0
+            ? string.Create(CultureInfo.InvariantCulture, $"tcp and ((outbound and !loopback) or (inbound and !loopback and tcp.DstPort == {relayPort}))")
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"(tcp or udp) and ((outbound and !loopback) or (inbound and !loopback and ((tcp and tcp.DstPort == {relayPort}) or (udp and udp.DstPort == {udpRelayPort}))))");
         try
         {
             networkHandle = Open(networkFilter, WinDivertLayer.Network, WinDivertFlags.None);
@@ -101,7 +105,7 @@ public sealed partial class WinDivertCaptureBackend : ICaptureBackend
         networkThread = new Thread(NetworkLoop) { IsBackground = true, Name = "Proxynator WinDivert packets" };
         socketThread.Start();
         networkThread.Start();
-        Log.Started(logger, relayPort);
+        Log.Started(logger, relayPort, udpRelayPort);
     }
 
     /// <inheritdoc />
@@ -129,6 +133,7 @@ public sealed partial class WinDivertCaptureBackend : ICaptureBackend
         if (context is not null)
         {
             firewall.RemoveRelayRule();
+            FlushDnsCache(); // no fake-IP answers may outlive the service
             Log.Stopped(logger);
             context = null;
         }
@@ -138,6 +143,18 @@ public sealed partial class WinDivertCaptureBackend : ICaptureBackend
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync() => await StopAsync(CancellationToken.None).ConfigureAwait(false);
+
+    private static void FlushDnsCache()
+    {
+        try
+        {
+            DnsApi.FlushResolverCache();
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            // Not available; nothing to flush.
+        }
+    }
 
     /// <summary>Checks a WinDivert filter for syntax errors without opening a handle.</summary>
     internal static unsafe string? ValidateFilter(string filter, WinDivertLayer layer)
@@ -232,14 +249,15 @@ public sealed partial class WinDivertCaptureBackend : ICaptureBackend
             }
 
             var socket = address.Socket;
+            var protocol = socket.Protocol == 17 ? TransportProtocol.Udp : TransportProtocol.Tcp;
             var remote = socket.RemoteAddr.ToUInt128();
             if (address.Event == WinDivertEvent.SocketConnect)
             {
-                owners.Add(socket.LocalPort, remote, socket.RemotePort, (int)socket.ProcessId);
+                owners.Add(protocol, socket.LocalPort, remote, socket.RemotePort, (int)socket.ProcessId);
             }
             else if (address.Event == WinDivertEvent.SocketClose)
             {
-                owners.Remove(socket.LocalPort, remote, socket.RemotePort);
+                owners.Remove(protocol, socket.LocalPort, remote, socket.RemotePort);
             }
         }
     }
@@ -306,18 +324,21 @@ public sealed partial class WinDivertCaptureBackend : ICaptureBackend
         }
     }
 
-    /// <summary>Called for every new outbound TCP connection; decides whether the relay must handle it.</summary>
+    /// <summary>Called for every new outbound TCP connection or UDP flow; decides whether a relay must handle it.</summary>
     private bool ShouldRedirect(ConnectionAttempt attempt)
     {
         var current = context!;
-        if (excludedEndpoints.Contains((attempt.RemoteAddress, attempt.RemotePort)))
+        var isUdp = attempt.Protocol == TransportProtocol.Udp;
+        if (excludedEndpoints.Contains((attempt.RemoteAddress, attempt.RemotePort)) || (isUdp && current.UdpDestinations is null))
         {
             return false;
         }
 
-        var processId = owners.TryGet(attempt.LocalPort, attempt.RemoteAddress, attempt.RemotePort, out var owner)
+        var processId = owners.TryGet(attempt.Protocol, attempt.LocalPort, attempt.RemoteAddress, attempt.RemotePort, out var owner)
             ? owner
-            : IpHelper.FindTcpOwner(attempt.IsIPv6, attempt.LocalPort, attempt.RemoteAddress, attempt.RemotePort);
+            : isUdp
+                ? IpHelper.FindUdpOwner(attempt.IsIPv6, attempt.LocalPort)
+                : IpHelper.FindTcpOwner(attempt.IsIPv6, attempt.LocalPort, attempt.RemoteAddress, attempt.RemotePort);
         if (processId == ownProcessId)
         {
             return false;
@@ -332,22 +353,33 @@ public sealed partial class WinDivertCaptureBackend : ICaptureBackend
         }
 
         var remoteAddress = attempt.RemoteIPAddress;
+        var settings = current.Configuration.Current.Settings;
+        string? hostname = null;
+        var isFake = current.FakeIps?.Contains(remoteAddress) == true;
+        if (isFake)
+        {
+            // Fake addresses only work through the relay; an unknown one is refused there, with a log entry.
+            current.FakeIps!.TryGetHostname(remoteAddress, out hostname);
+        }
+
+        var mustRelay = isFake || (isUdp && attempt.RemotePort == 53 && settings.Dns.Mode == DnsMode.Remote && current.FakeIps is not null);
+
         var connection = new ConnectionContext(
             processes.GetProcessInfo(processId),
-            TransportProtocol.Tcp,
+            attempt.Protocol,
             remoteAddress,
-            null,
+            hostname,
             attempt.RemotePort);
-        if (!current.Configuration.Current.Rules.RequiresRelay(connection))
+        if (!mustRelay && !current.Configuration.Current.Rules.RequiresRelay(connection))
         {
             return false;
         }
 
-        // The relay will see the reflected connection as coming from B:pa (original destination address, client port).
-        current.Destinations.Register(
+        // The relay will see the reflected flow as coming from B:pa (original destination address, client port).
+        (isUdp ? current.UdpDestinations! : current.Destinations).Register(
             new IPEndPoint(remoteAddress, attempt.LocalPort),
-            new OriginalDestination(new IPEndPoint(remoteAddress, attempt.RemotePort), processId));
-        Log.Redirecting(logger, connection.Process?.Name ?? "?", processId, connection.DestinationDisplay);
+            new OriginalDestination(new IPEndPoint(remoteAddress, attempt.RemotePort), processId, hostname));
+        Log.Redirecting(logger, attempt.Protocol, connection.Process?.Name ?? "?", processId, connection.DestinationDisplay);
         return true;
     }
 
@@ -356,14 +388,14 @@ public sealed partial class WinDivertCaptureBackend : ICaptureBackend
 
     private static partial class Log
     {
-        [LoggerMessage(EventId = 2000, Level = LogLevel.Information, Message = "WinDivert capture started; relay port {RelayPort}")]
-        public static partial void Started(ILogger logger, int relayPort);
+        [LoggerMessage(EventId = 2000, Level = LogLevel.Information, Message = "WinDivert capture started; TCP relay port {RelayPort}, UDP relay port {UdpRelayPort}")]
+        public static partial void Started(ILogger logger, int relayPort, int udpRelayPort);
 
         [LoggerMessage(EventId = 2001, Level = LogLevel.Information, Message = "WinDivert capture stopped; normal networking restored")]
         public static partial void Stopped(ILogger logger);
 
-        [LoggerMessage(EventId = 2002, Level = LogLevel.Debug, Message = "Redirecting {Process} (pid {ProcessId}) -> {Destination}")]
-        public static partial void Redirecting(ILogger logger, string process, int processId, string destination);
+        [LoggerMessage(EventId = 2002, Level = LogLevel.Debug, Message = "Redirecting {Protocol} {Process} (pid {ProcessId}) -> {Destination}")]
+        public static partial void Redirecting(ILogger logger, TransportProtocol protocol, string process, int processId, string destination);
 
         [LoggerMessage(EventId = 2003, Level = LogLevel.Warning, Message = "WinDivertRecv failed with Win32 error {Error}")]
         public static partial void ReceiveFailed(ILogger logger, int error);

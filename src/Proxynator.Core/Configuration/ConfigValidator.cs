@@ -28,10 +28,13 @@ public static class ConfigValidator
         CheckDefined(settings.Capture.Mode, "$.settings.capture.mode", errors);
         CheckDefined(settings.Dns.Mode, "$.settings.dns.mode", errors);
 
-        if (!AddressRange.TryParse(settings.Dns.FakeIpRange, out var fakeRange) || fakeRange.PrefixLength > (fakeRange.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 24 : 120))
+        if (!AddressRange.TryParse(settings.Dns.FakeIpRange, out var fakeRange) ||
+            fakeRange.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || fakeRange.PrefixLength > 24)
         {
-            errors.Add(new("$.settings.dns.fakeIpRange", $"'{settings.Dns.FakeIpRange}' is not a CIDR range with room for at least 256 addresses."));
+            errors.Add(new("$.settings.dns.fakeIpRange", $"'{settings.Dns.FakeIpRange}' is not an IPv4 CIDR range with room for at least 256 addresses."));
         }
+
+        CheckEntries(settings.Dns.RemoteDomains, "$.settings.dns.remoteDomains", static d => !string.IsNullOrWhiteSpace(d), "Must not be empty.", errors);
 
         if (settings.Dns.SniffTimeoutMs is < 0 or > 10_000)
         {

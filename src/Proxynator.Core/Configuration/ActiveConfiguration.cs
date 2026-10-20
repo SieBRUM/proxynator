@@ -13,7 +13,12 @@ public sealed class ActiveConfiguration
         Routes = routes;
         Rules = rules;
         ProxyEndpoints = [.. routes.Values.SelectMany(r => r.Hops).Select(h => h.Endpoint).Distinct()];
+        proxyHostnames = new HashSet<string>(ProxyEndpoints.Where(e => e.Host is not null).Select(e => e.Host!), StringComparer.OrdinalIgnoreCase);
+        remoteDomains = [.. config.Settings.Dns.RemoteDomains.Select(d => new WildcardPattern(d.TrimEnd('.')))];
     }
+
+    private readonly HashSet<string> proxyHostnames;
+    private readonly WildcardPattern[] remoteDomains;
 
     /// <summary>The source configuration.</summary>
     public ProxynatorConfig Config { get; }
@@ -29,6 +34,26 @@ public sealed class ActiveConfiguration
 
     /// <summary>Every configured proxy endpoint; capture backends must never redirect connections to these.</summary>
     public IReadOnlyList<TargetEndpoint> ProxyEndpoints { get; }
+
+    /// <summary>
+    /// Whether a DNS query for <paramref name="name"/> gets a fake answer in <see cref="DnsMode.Remote"/>. Proxy
+    /// hostnames (they must resolve for real), single-label names, <c>localhost</c> and reverse lookups never do.
+    /// </summary>
+    public bool ShouldFakeResolve(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        name = name.TrimEnd('.');
+        if (!name.Contains('.', StringComparison.Ordinal) ||
+            name.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith(".in-addr.arpa", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith(".ip6.arpa", StringComparison.OrdinalIgnoreCase) ||
+            proxyHostnames.Contains(name))
+        {
+            return false;
+        }
+
+        return remoteDomains.Any(pattern => pattern.IsMatch(name));
+    }
 
     /// <summary>Validates and compiles <paramref name="config"/>.</summary>
     /// <exception cref="ConfigValidationException">The configuration is invalid.</exception>

@@ -1,5 +1,6 @@
 using System.Net;
 using Proxynator.Core.Configuration;
+using Proxynator.Core.NameResolution;
 using Proxynator.Core.Relay;
 
 namespace Proxynator.Core.Platform;
@@ -13,4 +14,14 @@ public sealed record CaptureContext(
     ConfigurationStore Configuration,
     IOriginalDestinationTable Destinations,
     IReadOnlyList<IPEndPoint> RelayEndpoints,
-    int ServiceProcessId);
+    int ServiceProcessId)
+{
+    /// <summary>Where redirected UDP flows are registered for the UDP relay; null when UDP is not relayed.</summary>
+    public IOriginalDestinationTable? UdpDestinations { get; init; }
+
+    /// <summary>The UDP relay endpoints to redirect UDP flows to.</summary>
+    public IReadOnlyList<IPEndPoint> UdpRelayEndpoints { get; init; } = [];
+
+    /// <summary>The fake-IP pool: connections to its addresses always go to the relay, which knows the real hostname.</summary>
+    public FakeIpPool? FakeIps { get; init; }
+}

@@ -74,7 +74,14 @@ The user chooses the capture mode in config (`settings.capture.mode`).
 - Always excluded from redirection: the service's own PID (otherwise the relay's upstream connections loop),
   connections to configured proxy endpoints (resolved on every config change) and loopback (`proxyLoopback` is not
   implemented yet and logs a warning).
-- `block` action: the connection is relayed and reset (TCP). UDP is not captured yet.
+- UDP is diverted too (`(tcp or udp) and ...`): the same NAT reflects UDP flows to the UDP relay port (a flow starts
+  with any datagram). Owners come from SOCKET-layer events or `GetExtendedUdpTable` (by local port). Flows to fake-IP
+  addresses and, in `remote` DNS mode, UDP/53 always go to the relays. The DNS client cache is flushed on start and
+  stop so no fake answers outlive the service.
+- **Timeout invariant:** a NAT entry must expire *before* the relay session it feeds (UDP NAT 60 s / DNS 10 s, checked
+  on every lookup; UDP relay sessions 2 min / DNS 15 s). Otherwise a late datagram reaches the relay with neither
+  session nor registration and is dropped.
+- `block` action: TCP connections are relayed and reset; UDP datagrams are dropped by the UDP relay.
 
 **Windows – `injection` (user-mode, opt-in)**
 - Native hook DLL in `native/windows/hook` (C++, Microsoft Detours), built for **x64 and x86** so 32-bit targets work.
@@ -97,12 +104,24 @@ The user chooses the capture mode in config (`settings.capture.mode`).
 | `local` | App resolves locally; proxy receives the IP. | Simplest. |
 | `remote` | Fake-IP: DNS answers come from a synthetic range (default `198.18.0.0/15`); the relay maps the fake IP back to the hostname and lets the proxy resolve it. | No local DNS leak for proxied apps. |
 
-Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost.exe`), not by the app, so per-process attribution of DNS packets is impossible in `windivert` mode. `remote` mode in `windivert` is therefore applied system-wide (relay sends non-proxied fake-IP connections direct after real resolution). In `injection`/`preload` mode the resolver hooks make it per-process. Apps using their own DoH just look like ordinary TCP/443 flows and are handled by the rules.
+`remote` mode (Core `NameResolution/`): the capture redirects UDP/53 to the UDP relay, whose DNS sessions answer A
+queries for `settings.dns.remoteDomains` (default `*`) from `FakeIpPool` and return empty answers for AAAA/SVCB/HTTPS
+(so clients use the fake IPv4 address and get no real IP hints); other queries are forwarded to the real server.
+Proxy hostnames, single-label names, `*.localhost` and reverse lookups are never faked (`ActiveConfiguration.ShouldFakeResolve`).
+Connections to fake addresses always go to the relays, which use the hostname: proxies get it, direct connections
+resolve it with `ModeAwareResolver`, which queries the upstream DNS servers directly (`UpstreamDnsResolver`) while
+remote mode is on — the system resolver would return Proxynator's own fake answers.
+
+Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost.exe`), not by the app, so per-process attribution of DNS packets is impossible in `windivert` mode. `remote` mode in `windivert` is therefore applied system-wide for the listed domains (relay sends non-proxied fake-IP connections direct after real resolution). That includes the service's own process and in-process tests: resolve real addresses before turning remote mode on. In `injection`/`preload` mode the resolver hooks will make it per-process. Apps using their own DoH just look like ordinary TCP/443 flows and are handled by the rules.
 
 ### UDP
 
-- SOCKS5 proxies: UDP via `UDP ASSOCIATE` (one association per flow/process).
-- HTTP and SOCKS4 proxies can't carry UDP; the rule's `udp` setting decides `block` or `direct`.
+- `UdpRelayServer` (Core) mirrors the TCP relay: one session per client flow (keyed by the datagram source, i.e. the
+  registration key), idle sessions expire.
+- SOCKS5 proxies: UDP via `UDP ASSOCIATE` (`Socks5UdpAssociation`, one association per flow), only when the route is a
+  single SOCKS5 hop (UDP cannot be tunnelled through a TCP chain).
+- HTTP and SOCKS4 proxies and chains can't carry UDP; the rule's `udp` setting decides `block` (default, fail
+  closed) or `direct`.
 - `settings.udp.blockQuic` (default `true`) drops UDP/443 for proxied processes so browsers fall back to TCP/TLS, which the proxy can see.
 
 ### Rules
@@ -112,7 +131,10 @@ Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost
 - Actions: `proxy` (target = proxy id or chain id), `direct`, `block`.
 - Different rules can target different proxies, e.g. `test.exe` → SOCKS5 `127.0.0.1:5000` and `test3.exe` → HTTP `127.0.0.1:8080` (Burp).
 - Rule evaluation happens once per new connection; changing rules never affects established connections.
-- Child-process matching needs a parent-PID tracker (ETW process events on Windows, proc connector/BPF on Linux). Guard against PID reuse by also tracking process start time.
+- Child-process matching uses `ProcessTree` (Core): processes keyed by (PID, creation time), exited ones remembered
+  for 10 minutes, a parent only accepted if it is older than its child (PID reuse). On Windows it is fed by a
+  Toolhelp snapshot every 2 s and on every unknown PID, so launcher → `python.exe` chains (pipx tools) still match
+  after the launcher exits. Linux will feed it from the proc connector/BPF.
 
 ### Proxies and chains
 
@@ -162,12 +184,14 @@ src/
   Proxynator.Core/                 Platform-agnostic core, by namespace:
     Configuration/                   config model, loader (parse -> migrate -> validate), JSON source-gen
                                      context, ConfigValidator, ActiveConfiguration, ConfigurationStore
+    NameResolution/                  DnsWire (minimal DNS format), FakeIpPool, FakeDnsResponder, IHostResolver,
+                                     UpstreamDnsResolver, ModeAwareResolver
     Net/                             TargetEndpoint, AddressRange (CIDR), PortRange, ITcpConnector
     Rules/                           RuleEngine (Evaluate, RequiresRelay), compiled rules, wildcard matching
-    Processes/                       ProcessInfo, IProcessInfoProvider
-    Proxies/                         SOCKS4/4a, SOCKS5, HTTP CONNECT clients, ProxyRouteDialer (chains)
+    Processes/                       ProcessInfo, IProcessInfoProvider, ProcessTree (ancestors incl. exited parents)
+    Proxies/                         SOCKS4/4a, SOCKS5 (+ UDP ASSOCIATE), HTTP CONNECT clients, ProxyRouteDialer (chains)
     Sniffing/                        HostnameSniffer (TLS SNI, HTTP Host)
-    Relay/                           RelayServer, IOriginalDestinationTable, ConnectionTracker
+    Relay/                           RelayServer (TCP), UdpRelayServer, IOriginalDestinationTable, ConnectionTracker
     Platform/                        ICaptureBackend, CaptureContext, IPrivilegeChecker
   Proxynator.Platform.Windows/     WindowsPlatformModule, WinDivert interop + capture backend (Capture/,
                                    Interop/, Packets/), process info with ancestors, admin check, firewall rule
@@ -191,7 +215,7 @@ tests/
                                    tagged [Trait("Category","Integration")], skipped elsewhere unless
                                    PROXYNATOR_REQUIRE_INTEGRATION=1 (CI), which turns a skip into a failure
 schema/                            config JSON schema (keep in sync with the config model)
-samples/                           example configs (loaded by the tests, so they must stay valid)
+samples/                           example configs (every samples/*.json is loaded by a test, so they must stay valid)
 docs/                              design notes, ADRs (docs/adr/NNNN-title.md)
 .github/workflows/                 CI
 ```
@@ -207,7 +231,9 @@ docs/                              design notes, ADRs (docs/adr/NNNN-title.md)
 - Native code: C++17, CMake, built in CI. Third-party binaries (WinDivert) are downloaded at build time with a pinned
   version and verified SHA-256 (into `.cache/`, git-ignored), not committed.
 - Tests: xUnit v3 (`using Xunit` is global). Every proxy protocol client is tested against the in-process fake
-  proxy servers in `tests/Proxynator.Core.Tests/Support` (real SOCKS4/4a/5 and HTTP CONNECT servers on loopback).
+  proxy servers in `tests/Proxynator.Core.Tests/Support` (real SOCKS4/4a/5 incl. UDP ASSOCIATE and HTTP CONNECT
+  servers on loopback; also TCP/UDP echo servers and a scriptable UDP DNS server). `UdpRelayServer.DnsPort` is
+  internal so tests can treat a non-privileged port as DNS.
   Network tests take a `TestTimeout.Token()` so they can never hang. The rule engine, validator and sniffer get
   table-driven tests. Relay tests simulate a capture backend: bind the client socket, register it in the
   `OriginalDestinationTable`, connect to the relay.
@@ -252,13 +278,16 @@ Windows (WinDivert, Win32) is only exercised by CI's Windows job; check it after
 - WinDivert SOCKET/FLOW addresses are four host-order 32-bit words, most significant word last, IPv4 as
   `::ffff:a.b.c.d` (`AddressWords`).
 - `pkill -f <pattern>` in a shell whose own command line contains the pattern kills that shell; use PID files.
+- Windows-only behaviour that unit tests can't reach (real driver, Dnscache, firewall, process launch chains) is
+  covered by `tests/Proxynator.IntegrationTests`: curl.exe (TCP, SNI/Host sniffing, block, fail-closed, remote DNS
+  proxied and direct), nslookup.exe (UDP through SOCKS5) and a venv's pip.exe (pipx-style launcher chain).
 
 ## Roadmap
 
 - [x] Phase 0 — `README.md`, `CLAUDE.md`, license.
 - [x] Phase 1 — Solution scaffold, CI, Core: config model + schema + validation, rule engine, SOCKS4/4a/5 + HTTP CONNECT clients with auth, chain dialer, relay with hostname sniffing, `OriginalDestinationTable`. Fully unit-tested on both OSes.
 - [x] Phase 2 — Windows `windivert` TCP capture, PID attribution, exclusions, privilege check, `proxynatord` (console + Windows service), gRPC IPC, basic CLI (`status`, `config load|validate`, `rules list`, `connections`, `doctor`).
-- [ ] Phase 3 — DNS modes (`sniff`, `remote`), UDP via SOCKS5, QUIC blocking, child-process matching.
+- [x] Phase 3 — DNS modes (`sniff`, `remote` fake-IP), UDP capture + relay via SOCKS5, QUIC blocking, child-process matching with process history.
 - [ ] Phase 4 — Windows `injection` mode (Detours hook DLL x64/x86, `run`, `attach`, child propagation).
 - [ ] Phase 5 — Linux: `ebpf` + `nftables` capture, `preload` mode, systemd unit, `.deb` packaging for Ubuntu/Kali.
 - [ ] Phase 6 — Avalonia GUI.

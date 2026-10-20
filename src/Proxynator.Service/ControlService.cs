@@ -43,6 +43,9 @@ internal sealed class ControlService(ProxynatorEngine engine) : Control.ControlB
             ProcessId = Environment.ProcessId,
         };
         response.RelayEndpoints.AddRange(engine.Relay?.LocalEndpoints.Select(e => e.ToString()) ?? []);
+        response.UdpRelayEndpoints.AddRange(engine.UdpRelay?.LocalEndpoints.Select(e => e.ToString()) ?? []);
+        response.DnsMode = active.Settings.Dns.Mode.ToString().ToLowerInvariant();
+        response.FakeIpCount = engine.FakeIps.Count;
         return Task.FromResult(response);
     }
 
@@ -189,5 +192,6 @@ internal sealed class ControlService(ProxynatorEngine engine) : Control.ControlB
         Route = connection.Decision.Route?.Id ?? string.Empty,
         BytesSent = connection.BytesSent,
         BytesReceived = connection.BytesReceived,
+        Protocol = connection.Context.Protocol.ToString().ToLowerInvariant(),
     };
 }

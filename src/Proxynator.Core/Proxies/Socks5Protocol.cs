@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using Proxynator.Core.Net;
@@ -13,6 +14,7 @@ public sealed class Socks5Protocol(ProxyCredentials? credentials) : IProxyProtoc
     private const byte MethodUserPass = 0x02;
     private const byte MethodNoneAcceptable = 0xFF;
     private const byte CommandConnect = 1;
+    private const byte CommandUdpAssociate = 3;
     private const byte AddressIPv4 = 1;
     private const byte AddressDomain = 3;
     private const byte AddressIPv6 = 4;
@@ -23,13 +25,19 @@ public sealed class Socks5Protocol(ProxyCredentials? credentials) : IProxyProtoc
         ArgumentNullException.ThrowIfNull(transport);
         ArgumentNullException.ThrowIfNull(target);
 
-        await NegotiateAuthenticationAsync(transport, cancellationToken).ConfigureAwait(false);
+        await NegotiateAuthenticationAsync(transport, credentials, cancellationToken).ConfigureAwait(false);
         await transport.WriteAsync(BuildConnectRequest(target), cancellationToken).ConfigureAwait(false);
-        await ReadConnectReplyAsync(transport, target, cancellationToken).ConfigureAwait(false);
+        await ReadReplyAsync(transport, $"the connection to {target}", cancellationToken).ConfigureAwait(false);
         return transport;
     }
 
-    internal static byte[] BuildConnectRequest(TargetEndpoint target)
+    internal static byte[] BuildConnectRequest(TargetEndpoint target) => [Version, CommandConnect, 0, .. EncodeAddress(target)];
+
+    /// <summary>UDP ASSOCIATE with an unspecified client address: the proxy accepts datagrams from any source port.</summary>
+    internal static byte[] BuildUdpAssociateRequest() => [Version, CommandUdpAssociate, 0, AddressIPv4, 0, 0, 0, 0, 0, 0];
+
+    /// <summary>ATYP, address and port, as used in requests, replies and UDP headers.</summary>
+    internal static byte[] EncodeAddress(TargetEndpoint target)
     {
         byte[] address;
         if (target.Host is { } host)
@@ -46,15 +54,61 @@ public sealed class Socks5Protocol(ProxyCredentials? credentials) : IProxyProtoc
             address = [AddressIPv4, .. target.Address.GetAddressBytes()];
         }
 
-        var request = new byte[3 + address.Length + 2];
-        request[0] = Version;
-        request[1] = CommandConnect;
-        address.CopyTo(request, 3);
-        BinaryPrimitives.WriteUInt16BigEndian(request.AsSpan(3 + address.Length), (ushort)target.Port);
-        return request;
+        return [.. address, (byte)(target.Port >> 8), (byte)target.Port];
     }
 
-    private async Task NegotiateAuthenticationAsync(Stream transport, CancellationToken cancellationToken)
+    /// <summary>Decodes ATYP, address and port; returns the number of bytes used, or 0 if malformed.</summary>
+    internal static int TryDecodeAddress(ReadOnlySpan<byte> data, out TargetEndpoint? endpoint)
+    {
+        endpoint = null;
+        if (data.IsEmpty)
+        {
+            return 0;
+        }
+
+        int addressLength, offset;
+        switch (data[0])
+        {
+            case AddressIPv4:
+                (offset, addressLength) = (1, 4);
+                break;
+            case AddressIPv6:
+                (offset, addressLength) = (1, 16);
+                break;
+            case AddressDomain when data.Length > 1:
+                (offset, addressLength) = (2, data[1]);
+                break;
+            default:
+                return 0;
+        }
+
+        if (data.Length < offset + addressLength + 2)
+        {
+            return 0;
+        }
+
+        var port = BinaryPrimitives.ReadUInt16BigEndian(data[(offset + addressLength)..]);
+        if (port == 0)
+        {
+            return 0;
+        }
+
+        var address = data.Slice(offset, addressLength);
+        try
+        {
+            endpoint = data[0] == AddressDomain
+                ? TargetEndpoint.FromHost(Encoding.ASCII.GetString(address), port)
+                : TargetEndpoint.FromAddress(new IPAddress(address), port);
+        }
+        catch (ArgumentException)
+        {
+            return 0;
+        }
+
+        return offset + addressLength + 2;
+    }
+
+    internal static async Task NegotiateAuthenticationAsync(Stream transport, ProxyCredentials? credentials, CancellationToken cancellationToken)
     {
         byte[] greeting = credentials is null
             ? [Version, 1, MethodNoAuth]
@@ -106,7 +160,8 @@ public sealed class Socks5Protocol(ProxyCredentials? credentials) : IProxyProtoc
         }
     }
 
-    private static async Task ReadConnectReplyAsync(Stream transport, TargetEndpoint target, CancellationToken cancellationToken)
+    /// <summary>Reads a reply; returns the bound address (null for a domain), or throws if the request was refused.</summary>
+    internal static async Task<IPEndPoint?> ReadReplyAsync(Stream transport, string what, CancellationToken cancellationToken)
     {
         var header = new byte[4];
         await transport.ReadExactlyAsync(header, cancellationToken).ConfigureAwait(false);
@@ -117,10 +172,9 @@ public sealed class Socks5Protocol(ProxyCredentials? credentials) : IProxyProtoc
 
         if (header[1] != 0)
         {
-            throw new ProxyException(ProxyFailure.Rejected, $"SOCKS5 proxy refused the connection to {target}: {DescribeReply(header[1])}.");
+            throw new ProxyException(ProxyFailure.Rejected, $"SOCKS5 proxy refused {what}: {DescribeReply(header[1])}.");
         }
 
-        // Skip the bound address and port.
         var remaining = header[3] switch
         {
             AddressIPv4 => 4 + 2,
@@ -128,7 +182,14 @@ public sealed class Socks5Protocol(ProxyCredentials? credentials) : IProxyProtoc
             AddressDomain => await ReadByteAsync(transport, cancellationToken).ConfigureAwait(false) + 2,
             _ => throw new ProxyException(ProxyFailure.ProtocolError, $"Unknown SOCKS5 address type {header[3]} in reply."),
         };
-        await transport.ReadExactlyAsync(new byte[remaining], cancellationToken).ConfigureAwait(false);
+        var bound = new byte[remaining];
+        await transport.ReadExactlyAsync(bound, cancellationToken).ConfigureAwait(false);
+        if (header[3] == AddressDomain)
+        {
+            return null;
+        }
+
+        return new IPEndPoint(new IPAddress(bound.AsSpan(0, remaining - 2)), BinaryPrimitives.ReadUInt16BigEndian(bound.AsSpan(remaining - 2)));
     }
 
     private static async Task<int> ReadByteAsync(Stream transport, CancellationToken cancellationToken)

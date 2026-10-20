@@ -3,11 +3,44 @@ using System.Buffers.Binary;
 namespace Proxynator.Platform.Windows.Interop;
 
 /// <summary>
-/// Searches the raw output of <c>GetExtendedTcpTable(TCP_TABLE_OWNER_PID_ALL)</c> for the owner of a connection.
-/// Kept free of P/Invoke so it can be unit-tested on any OS.
+/// Searches the raw output of <c>GetExtendedTcpTable(TCP_TABLE_OWNER_PID_ALL)</c> and
+/// <c>GetExtendedUdpTable(UDP_TABLE_OWNER_PID)</c> for the owner of a socket. Kept free of P/Invoke so it can be
+/// unit-tested on any OS.
 /// </summary>
 internal static class TcpTableParser
 {
+    /// <summary><c>sizeof(MIB_UDPROW_OWNER_PID)</c>.</summary>
+    public const int UdpIPv4RowSize = 12;
+
+    /// <summary><c>sizeof(MIB_UDP6ROW_OWNER_PID)</c>.</summary>
+    public const int UdpIPv6RowSize = 28;
+
+    /// <summary>Returns the owning PID of the UDP socket bound to <paramref name="localPort"/>, or -1.</summary>
+    public static int FindUdpOwner(ReadOnlySpan<byte> table, bool ipv6, int localPort)
+    {
+        if (table.Length < 4)
+        {
+            return -1;
+        }
+
+        var count = BinaryPrimitives.ReadUInt32LittleEndian(table);
+        var rowSize = ipv6 ? UdpIPv6RowSize : UdpIPv4RowSize;
+        var rows = table[4..];
+        for (var i = 0; i < count && (i + 1) * rowSize <= rows.Length; i++)
+        {
+            var row = rows.Slice(i * rowSize, rowSize);
+
+            // IPv4: dwLocalAddr, dwLocalPort, dwOwningPid. IPv6: ucLocalAddr[16], dwLocalScopeId, dwLocalPort, dwOwningPid.
+            var portOffset = ipv6 ? 20 : 4;
+            if (BinaryPrimitives.ReadUInt16BigEndian(row[portOffset..]) == localPort)
+            {
+                return (int)BinaryPrimitives.ReadUInt32LittleEndian(row[(portOffset + 4)..]);
+            }
+        }
+
+        return -1;
+    }
+
     /// <summary><c>sizeof(MIB_TCPROW_OWNER_PID)</c>.</summary>
     public const int IPv4RowSize = 24;
 

@@ -15,14 +15,23 @@ internal sealed partial class WindowsFirewall(ILogger logger)
 {
     private const string RuleName = "Proxynator relay";
 
-    /// <summary>Replaces any stale rule with one allowing <paramref name="port"/> for the current program.</summary>
-    public void AllowRelayPort(int port)
+    /// <summary>Replaces any stale rules with ones allowing the relay ports (UDP only when non-zero) for the current program.</summary>
+    public void AllowRelayPorts(int tcpPort, int udpPort)
     {
         RemoveRelayRule();
+        AddRule("TCP", tcpPort);
+        if (udpPort != 0)
+        {
+            AddRule("UDP", udpPort);
+        }
+    }
+
+    private void AddRule(string protocol, int port)
+    {
         var program = Environment.ProcessPath ?? string.Empty;
         Run(
             LogLevel.Warning,
-            "advfirewall", "firewall", "add", "rule", $"name={RuleName}", "dir=in", "action=allow", "protocol=TCP",
+            "advfirewall", "firewall", "add", "rule", $"name={RuleName}", "dir=in", "action=allow", $"protocol={protocol}",
             string.Create(CultureInfo.InvariantCulture, $"localport={port}"), $"program={program}", "profile=any", "enable=yes");
     }
 

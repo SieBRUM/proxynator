@@ -17,6 +17,18 @@ public class ConfigLoaderTests
         Assert.Equal(4, result.Config.Rules.Count);
     }
 
+    public static TheoryData<string> Samples() =>
+        [.. Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "samples"), "*.json").Select(path => Path.GetFileName(path))];
+
+    [Theory]
+    [MemberData(nameof(Samples))]
+    public async Task Every_sample_config_is_valid(string file)
+    {
+        var result = await ConfigLoader.LoadFileAsync(Path.Combine(AppContext.BaseDirectory, "samples", file));
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+    }
+
     [Fact]
     public void Minimal_config_gets_defaults()
     {

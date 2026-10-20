@@ -46,6 +46,22 @@ internal static class PacketBuilder
         return packet;
     }
 
+    /// <summary>A UDP packet: a TCP packet with the protocol field changed (ports sit at the same offsets).</summary>
+    public static byte[] Udp(string source, int sourcePort, string destination, int destinationPort)
+    {
+        var packet = Tcp(source, sourcePort, destination, destinationPort, 0);
+        if (packet[0] >> 4 == 6)
+        {
+            packet[6] = 17;
+        }
+        else
+        {
+            packet[9] = 17;
+        }
+
+        return packet;
+    }
+
     public static (string Source, int SourcePort, string Destination, int DestinationPort) Read(byte[] packet)
     {
         var isIPv6 = packet[0] >> 4 == 6;

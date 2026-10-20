@@ -126,6 +126,18 @@ public class ControlApiTests
     }
 
     [Fact]
+    public async Task Remote_dns_mode_is_reported_by_status_and_diagnostics()
+    {
+        await using var service = await TestService.StartAsync(initialConfigJson: """{ "version": 1, "settings": { "dns": { "mode": "remote" } } }""");
+
+        var status = await service.Client.GetStatusAsync(new GetStatusRequest(), cancellationToken: TestTimeout.Token());
+        var results = (await service.Client.RunDiagnosticsAsync(new RunDiagnosticsRequest(), cancellationToken: TestTimeout.Token())).Results;
+
+        Assert.Equal("remote", status.DnsMode);
+        Assert.Contains(results, r => r.Name == "Remote DNS");
+    }
+
+    [Fact]
     public async Task Service_refuses_to_start_without_privileges_when_capturing()
     {
         var ex = await Assert.ThrowsAsync<ServiceStartupException>(() =>
@@ -166,6 +178,11 @@ public class ControlApiTests
         Assert.Equal(service.Engine.Relay!.LocalEndpoints, backend.Context!.RelayEndpoints);
         Assert.Equal(Environment.ProcessId, backend.Context.ServiceProcessId);
         Assert.NotEqual(0, backend.Context.RelayEndpoints[0].Port);
+        Assert.Equal(service.Engine.UdpRelay!.LocalEndpoints, backend.Context.UdpRelayEndpoints);
+        Assert.Same(service.Engine.UdpDestinations, backend.Context.UdpDestinations);
+        Assert.Same(service.Engine.FakeIps, backend.Context.FakeIps);
+        Assert.Single(status.UdpRelayEndpoints);
+        Assert.Equal("sniff", status.DnsMode);
 
         await service.DisposeAsync();
         Assert.True(backend.Stopped);

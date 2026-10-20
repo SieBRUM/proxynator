@@ -4,10 +4,17 @@
   "title": "Proxynator configuration",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version"],
+  "required": [
+    "version"
+  ],
   "properties": {
-    "$schema": { "type": "string" },
-    "version": { "const": 1, "description": "Configuration schema version." },
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1,
+      "description": "Configuration schema version."
+    },
     "settings": {
       "type": "object",
       "additionalProperties": false,
@@ -17,11 +24,22 @@
           "additionalProperties": false,
           "properties": {
             "mode": {
-              "enum": ["auto", "windivert", "injection", "ebpf", "nftables", "preload"],
+              "enum": [
+                "auto",
+                "windivert",
+                "injection",
+                "ebpf",
+                "nftables",
+                "preload"
+              ],
               "default": "auto",
               "description": "Capture backend. 'auto' picks windivert on Windows and ebpf on Linux."
             },
-            "proxyLoopback": { "type": "boolean", "default": false, "description": "Apply rules to loopback connections." }
+            "proxyLoopback": {
+              "type": "boolean",
+              "default": false,
+              "description": "Apply rules to loopback connections."
+            }
           }
         },
         "dns": {
@@ -29,26 +47,59 @@
           "additionalProperties": false,
           "properties": {
             "mode": {
-              "enum": ["sniff", "local", "remote"],
+              "enum": [
+                "sniff",
+                "local",
+                "remote"
+              ],
               "default": "sniff",
               "description": "sniff: hostname from TLS SNI / HTTP Host; local: send IPs; remote: fake-IP DNS, proxy resolves."
             },
-            "fakeIpRange": { "type": "string", "default": "198.18.0.0/15", "description": "CIDR range for fake DNS answers (remote mode)." },
-            "sniffTimeoutMs": { "type": "integer", "minimum": 0, "maximum": 10000, "default": 250 }
+            "fakeIpRange": {
+              "type": "string",
+              "default": "198.18.0.0/15",
+              "description": "IPv4 CIDR range (at least /24) for fake DNS answers in remote mode."
+            },
+            "sniffTimeoutMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000,
+              "default": 250
+            },
+            "remoteDomains": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "default": [
+                "*"
+              ],
+              "description": "Names answered with fake addresses in remote mode (wildcards, e.g. *.corp.local). Proxy hostnames, single-label names and reverse lookups are never faked."
+            }
           }
         },
         "udp": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "blockQuic": { "type": "boolean", "default": true, "description": "Drop UDP/443 for proxied processes so they fall back to TCP." }
+            "blockQuic": {
+              "type": "boolean",
+              "default": true,
+              "description": "Drop UDP/443 for proxied processes so they fall back to TCP."
+            }
           }
         },
         "relay": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "connectTimeoutMs": { "type": "integer", "minimum": 100, "maximum": 300000, "default": 10000 }
+            "connectTimeoutMs": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 300000,
+              "default": 10000
+            }
           }
         }
       }
@@ -58,19 +109,50 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "type", "host", "port"],
+        "required": [
+          "id",
+          "type",
+          "host",
+          "port"
+        ],
         "properties": {
-          "id": { "type": "string", "minLength": 1 },
-          "type": { "enum": ["socks4", "socks4a", "socks5", "http"] },
-          "host": { "type": "string", "minLength": 1 },
-          "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "enum": [
+              "socks4",
+              "socks4a",
+              "socks5",
+              "http"
+            ]
+          },
+          "host": {
+            "type": "string",
+            "minLength": 1
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
           "auth": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["username"],
+            "required": [
+              "username"
+            ],
             "properties": {
-              "username": { "type": "string", "minLength": 1, "description": "User name, or the user ID for SOCKS4/4a." },
-              "password": { "type": "string", "description": "Not allowed for SOCKS4/4a; required for SOCKS5." }
+              "username": {
+                "type": "string",
+                "minLength": 1,
+                "description": "User name, or the user ID for SOCKS4/4a."
+              },
+              "password": {
+                "type": "string",
+                "description": "Not allowed for SOCKS4/4a; required for SOCKS5."
+              }
             }
           }
         }
@@ -81,10 +163,23 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "hops"],
+        "required": [
+          "id",
+          "hops"
+        ],
         "properties": {
-          "id": { "type": "string", "minLength": 1 },
-          "hops": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "Proxy ids, first hop first." }
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "hops": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Proxy ids, first hop first."
+          }
         }
       }
     },
@@ -94,30 +189,95 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "action"],
+        "required": [
+          "name",
+          "action"
+        ],
         "properties": {
-          "name": { "type": "string", "minLength": 1 },
-          "enabled": { "type": "boolean", "default": true },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
           "match": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "processes": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Name or full-path patterns with * and ? wildcards." },
-              "includeChildren": { "type": "boolean", "default": false },
-              "hosts": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Hostname patterns, e.g. *.example.com." },
-              "addresses": { "type": "array", "items": { "type": "string" }, "description": "IP addresses or CIDR ranges." },
-              "ports": { "type": "array", "items": { "type": "string", "pattern": "^\\s*\\d+\\s*(-\\s*\\d+\\s*)?$" }, "description": "Ports or ranges, e.g. 443 or 8000-8100." },
-              "protocols": { "type": "array", "items": { "enum": ["tcp", "udp"] } }
+              "processes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "Name or full-path patterns with * and ? wildcards."
+              },
+              "includeChildren": {
+                "type": "boolean",
+                "default": false
+              },
+              "hosts": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "Hostname patterns, e.g. *.example.com."
+              },
+              "addresses": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "IP addresses or CIDR ranges."
+              },
+              "ports": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^\\s*\\d+\\s*(-\\s*\\d+\\s*)?$"
+                },
+                "description": "Ports or ranges, e.g. 443 or 8000-8100."
+              },
+              "protocols": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "tcp",
+                    "udp"
+                  ]
+                }
+              }
             }
           },
           "action": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["type"],
+            "required": [
+              "type"
+            ],
             "properties": {
-              "type": { "enum": ["proxy", "direct", "block"] },
-              "target": { "type": "string", "description": "Proxy or chain id; only for type 'proxy'." },
-              "udp": { "enum": ["block", "direct"], "default": "block", "description": "UDP handling when the target cannot carry UDP." }
+              "type": {
+                "enum": [
+                  "proxy",
+                  "direct",
+                  "block"
+                ]
+              },
+              "target": {
+                "type": "string",
+                "description": "Proxy or chain id; only for type 'proxy'."
+              },
+              "udp": {
+                "enum": [
+                  "block",
+                  "direct"
+                ],
+                "default": "block",
+                "description": "UDP handling when the target cannot carry UDP."
+              }
             }
           }
         }

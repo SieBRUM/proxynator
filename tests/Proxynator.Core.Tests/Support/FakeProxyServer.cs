@@ -14,8 +14,8 @@ public enum FakeProxyKind
     Http,
 }
 
-/// <summary>What a fake proxy was asked to connect to.</summary>
-internal sealed record FakeProxyRequest(string? Host, IPAddress? Address, int Port, string? Username, string? Password, string? UserId);
+/// <summary>What a fake proxy was asked to connect to (or, for SOCKS5 UDP, to send a datagram to).</summary>
+internal sealed record FakeProxyRequest(string? Host, IPAddress? Address, int Port, string? Username, string? Password, string? UserId, bool Udp = false);
 
 /// <summary>
 /// A minimal but real SOCKS4/4a, SOCKS5 or HTTP CONNECT proxy on loopback. It records every request and then
@@ -168,6 +168,13 @@ internal sealed class FakeProxyServer : IAsyncDisposable
         var header = await ReadAsync(stream, 4);
         string? host = null;
         IPAddress? address = null;
+        if (header[1] == 3)
+        {
+            await ReadAsync(stream, header[3] == 4 ? 18 : 6); // the (unused) client address of UDP ASSOCIATE
+            await RunUdpAssociationAsync(stream);
+            return null;
+        }
+
         switch (header[3])
         {
             case 1:
@@ -232,6 +239,100 @@ internal sealed class FakeProxyServer : IAsyncDisposable
 
         await stream.WriteAsync("HTTP/1.1 200 Connection established\r\n\r\n"u8.ToArray(), stop.Token);
         return request;
+    }
+
+    /// <summary>
+    /// SOCKS5 UDP ASSOCIATE: relays datagrams between the client and the resolved targets until the client closes the
+    /// control connection. Replies carry the address the client asked for, as RFC 1928 requires.
+    /// </summary>
+    private async Task RunUdpAssociationAsync(NetworkStream control)
+    {
+        using var relay = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        relay.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        var port = ((IPEndPoint)relay.LocalEndPoint!).Port;
+        await control.WriteAsync(new byte[] { 5, (byte)(RejectAll ? 5 : 0), 0, 1, 127, 0, 0, 1, (byte)(port >> 8), (byte)port }, stop.Token);
+        if (RejectAll)
+        {
+            return;
+        }
+
+        using var association = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (await control.ReadAsync(new byte[1], association.Token) > 0)
+                {
+                }
+            }
+            catch (Exception ex) when (ex is IOException or OperationCanceledException or ObjectDisposedException)
+            {
+            }
+
+            await association.CancelAsync();
+        });
+
+        var upstreams = new Dictionary<IPEndPoint, Socket>();
+        var buffer = new byte[65535];
+        try
+        {
+            while (true)
+            {
+                var result = await relay.ReceiveFromAsync(buffer, SocketFlags.None, new IPEndPoint(IPAddress.Any, 0), association.Token);
+                var client = (IPEndPoint)result.RemoteEndPoint;
+                var datagram = buffer.AsSpan(0, result.ReceivedBytes);
+                var addressStart = 3;
+                var (host, address, addressLength) = datagram[addressStart] switch
+                {
+                    1 => ((string?)null, new IPAddress(datagram.Slice(addressStart + 1, 4)), 1 + 4),
+                    4 => (null, new IPAddress(datagram.Slice(addressStart + 1, 16)), 1 + 16),
+                    _ => (Encoding.ASCII.GetString(datagram.Slice(addressStart + 2, datagram[addressStart + 1])), (IPAddress?)null, 2 + datagram[addressStart + 1]),
+                };
+                var targetPort = BinaryPrimitives.ReadUInt16BigEndian(datagram[(addressStart + addressLength)..]);
+                var requestedAddress = datagram.Slice(addressStart, addressLength + 2).ToArray();
+                var payload = datagram[(addressStart + addressLength + 2)..].ToArray();
+                var request = new FakeProxyRequest(host, address, targetPort, null, null, null, Udp: true);
+                Requests.Enqueue(request);
+
+                var target = Resolve(request);
+                if (!upstreams.TryGetValue(target, out var upstream))
+                {
+                    upstream = new Socket(target.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
+                    await upstream.ConnectAsync(target, association.Token);
+                    upstreams[target] = upstream;
+                    _ = RelayRepliesAsync(upstream, relay, client, requestedAddress, association.Token);
+                }
+
+                await upstream.SendAsync(payload, association.Token);
+            }
+        }
+        catch (Exception ex) when (ex is SocketException or OperationCanceledException or ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            foreach (var upstream in upstreams.Values)
+            {
+                upstream.Dispose();
+            }
+        }
+    }
+
+    private static async Task RelayRepliesAsync(Socket upstream, Socket relay, IPEndPoint client, byte[] requestedAddress, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[65535];
+        try
+        {
+            while (true)
+            {
+                var length = await upstream.ReceiveAsync(buffer, cancellationToken);
+                byte[] reply = [0, 0, 0, .. requestedAddress, .. buffer.AsSpan(0, length)];
+                await relay.SendToAsync(reply, SocketFlags.None, client, cancellationToken);
+            }
+        }
+        catch (Exception ex) when (ex is SocketException or OperationCanceledException or ObjectDisposedException)
+        {
+        }
     }
 
     private async Task<byte[]> ReadAsync(NetworkStream stream, int count)

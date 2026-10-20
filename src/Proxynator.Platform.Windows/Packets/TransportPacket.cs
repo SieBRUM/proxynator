@@ -4,12 +4,13 @@ using Proxynator.Platform.Windows.Interop;
 namespace Proxynator.Platform.Windows.Packets;
 
 /// <summary>
-/// A mutable view of an IPv4 or IPv6 packet carrying TCP. Only the fields the NAT needs are exposed; checksums are
-/// recalculated by WinDivert after rewriting.
+/// A mutable view of an IPv4 or IPv6 packet carrying TCP or UDP. Only the fields the NAT needs are exposed;
+/// checksums are recalculated by WinDivert after rewriting. Ports sit at the same offsets in both headers.
 /// </summary>
-internal ref struct TcpPacket
+internal ref struct TransportPacket
 {
     private const byte ProtocolTcp = 6;
+    private const byte ProtocolUdp = 17;
     private const byte FlagFin = 0x01;
     private const byte FlagSyn = 0x02;
     private const byte FlagRst = 0x04;
@@ -21,10 +22,11 @@ internal ref struct TcpPacket
     private readonly int addressLength;
     private readonly int tcpOffset;
 
-    private TcpPacket(Span<byte> packet, bool isIPv6, int sourceOffset, int destinationOffset, int tcpOffset)
+    private TransportPacket(Span<byte> packet, bool isIPv6, bool isUdp, int sourceOffset, int destinationOffset, int tcpOffset)
     {
         this.packet = packet;
         IsIPv6 = isIPv6;
+        IsUdp = isUdp;
         this.sourceOffset = sourceOffset;
         this.destinationOffset = destinationOffset;
         addressLength = isIPv6 ? 16 : 4;
@@ -32,6 +34,9 @@ internal ref struct TcpPacket
     }
 
     public bool IsIPv6 { get; }
+
+    /// <summary>UDP rather than TCP. TCP flags read as false for UDP.</summary>
+    public bool IsUdp { get; }
 
     public readonly UInt128 SourceAddress => ReadAddress(sourceOffset);
 
@@ -60,13 +65,13 @@ internal ref struct TcpPacket
     /// <summary>A SYN without ACK: the first packet of a new outbound connection.</summary>
     public readonly bool IsConnectionAttempt => IsSyn && !IsAck;
 
-    private readonly byte Flags => packet[tcpOffset + 13];
+    private readonly byte Flags => IsUdp ? (byte)0 : packet[tcpOffset + 13];
 
     /// <summary>
-    /// Parses <paramref name="packet"/>. Returns <see langword="false"/> for non-TCP packets, IP fragments and
+    /// Parses <paramref name="packet"/>. Returns <see langword="false"/> for other protocols, IP fragments and
     /// truncated packets, which the NAT leaves alone.
     /// </summary>
-    public static bool TryParse(Span<byte> packet, out TcpPacket tcp)
+    public static bool TryParse(Span<byte> packet, out TransportPacket tcp)
     {
         tcp = default;
         if (packet.Length < 20)
@@ -82,13 +87,14 @@ internal ref struct TcpPacket
                 var fragment = BinaryPrimitives.ReadUInt16BigEndian(packet[6..]);
                 var moreFragments = (fragment & 0x2000) != 0;
                 var fragmentOffset = fragment & 0x1FFF;
-                if (headerLength < 20 || packet[9] != ProtocolTcp || moreFragments || fragmentOffset != 0 ||
-                    packet.Length < headerLength + 20)
+                var protocol = packet[9];
+                if (headerLength < 20 || protocol is not (ProtocolTcp or ProtocolUdp) || moreFragments || fragmentOffset != 0 ||
+                    packet.Length < headerLength + MinimumHeader(protocol))
                 {
                     return false;
                 }
 
-                tcp = new TcpPacket(packet, isIPv6: false, 12, 16, headerLength);
+                tcp = new TransportPacket(packet, isIPv6: false, protocol == ProtocolUdp, 12, 16, headerLength);
                 return true;
             }
 
@@ -112,12 +118,12 @@ internal ref struct TcpPacket
                     offset += (packet[offset + 1] + 1) * 8;
                 }
 
-                if (nextHeader != ProtocolTcp || packet.Length < offset + 20)
+                if (nextHeader is not (ProtocolTcp or ProtocolUdp) || packet.Length < offset + MinimumHeader(nextHeader))
                 {
                     return false;
                 }
 
-                tcp = new TcpPacket(packet, isIPv6: true, 8, 24, offset);
+                tcp = new TransportPacket(packet, isIPv6: true, nextHeader == ProtocolUdp, 8, 24, offset);
                 return true;
             }
 
@@ -125,6 +131,8 @@ internal ref struct TcpPacket
                 return false;
         }
     }
+
+    private static int MinimumHeader(byte protocol) => protocol == ProtocolUdp ? 8 : 20;
 
     /// <summary>Swaps the source and destination addresses (ports are left alone).</summary>
     public readonly void SwapAddresses()

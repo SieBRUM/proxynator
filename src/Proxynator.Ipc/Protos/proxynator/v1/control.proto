@@ -48,6 +48,11 @@ message GetStatusResponse {
   int32 active_connections = 8;
   bool privileged = 9;
   int32 process_id = 10;
+  repeated string udp_relay_endpoints = 11;
+  // "sniff", "local" or "remote".
+  string dns_mode = 12;
+  // Hostnames currently mapped to fake addresses (remote DNS mode).
+  int32 fake_ip_count = 13;
 }
 
 enum CaptureState {
@@ -129,6 +134,8 @@ message Connection {
   string route = 9;
   int64 bytes_sent = 10;
   int64 bytes_received = 11;
+  // "tcp" or "udp".
+  string protocol = 12;
 }
 
 message WatchConnectionsRequest {}

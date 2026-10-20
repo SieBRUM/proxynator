@@ -4,9 +4,10 @@
 
 Proxynator is an open-source, rule-based traffic redirector for Windows (and, later, Linux). It captures the outbound connections of the applications you choose and sends them through SOCKS4, SOCKS4a, SOCKS5 or HTTP `CONNECT` proxies. Proxy chains are supported too. Its main use is analysis: point a stubborn desktop app, CLI tool or game at Burp Suite, mitmproxy or a SOCKS pivot, even when that app has no proxy setting or ignores it.
 
-> **Status: early development.** On Windows, TCP traffic can be captured and routed (kernel-level `windivert`
-> mode), controlled with the `proxynator` CLI. UDP, the `remote` DNS mode, `injection` mode, Linux and the GUI are
-> still to come. See [known limitations](#known-limitations) and the [roadmap](#roadmap).
+> **Status: early development.** On Windows, TCP and UDP traffic can be captured and routed (kernel-level
+> `windivert` mode), including fake-IP DNS for resolving internal names through a pivot, controlled with the
+> `proxynator` CLI. `injection` mode, Linux and the GUI are still to come. See
+> [known limitations](#known-limitations) and the [roadmap](#roadmap).
 
 ## Why another proxy tool?
 
@@ -29,8 +30,8 @@ Proxynator's default mode captures traffic **at the kernel network layer** and t
 - **Configurable DNS handling:**
   - ✅ `sniff` (default): recover hostnames from TLS SNI or the HTTP `Host` header.
   - ✅ `local`: send the IP address the app resolved.
-  - `remote`: answer DNS with fake IPs and let the proxy do the real resolution.
-- **UDP:** carried through SOCKS5 `UDP ASSOCIATE`; otherwise blocked or sent direct per rule. QUIC can be blocked so browsers fall back to TCP.
+  - ✅ `remote`: answer DNS with fake IPs and let the proxy do the real resolution, so internal names behind a pivot work.
+- ✅ **UDP:** carried through SOCKS5 `UDP ASSOCIATE`; otherwise blocked or sent direct per rule. QUIC is blocked for proxied apps so browsers fall back to TCP.
 - ✅ **Fails closed:** if a rule says *proxy* and the proxy is down, the connection fails. It is never silently sent direct.
 - ✅ **Fail-safe for the host:** if the service stops or crashes, normal networking resumes.
 - ✅ **Headless service + CLI**, with a cross-platform GUI planned.
@@ -168,18 +169,51 @@ proxynator connections [--follow]       # relayed connections: process, destinat
 Exit codes: `0` success, `1` failure (invalid config, failed checks), `2` service not reachable. Planned for the
 `injection` mode: `proxynator run -- app.exe` and `proxynator attach <pid>`.
 
+## Python tools (pipx, NetExec, roadtools)
+
+Tools installed with pipx (or pip into a venv) don't run as their own process. `nxc.exe`, `roadrecon.exe` and
+`roadtx.exe` are small launchers that start the venv's `python.exe`, which in turn starts the real interpreter. That
+interpreter opens the connections. So match the launcher and set `includeChildren`:
+
+```json
+{ "name": "NetExec", "match": { "processes": ["nxc.exe", "netexec.exe"], "includeChildren": true }, "action": { "type": "proxy", "target": "pivot" } }
+```
+
+Child matching keeps working if the launcher exits early. Don't match plain `python.exe`: that would catch every
+Python program. To match a script you run with `python script.py`, match its venv instead, for example
+`"processes": ["*\\venvs\\netexec\\*"]` with `includeChildren`. CI tests exactly this launcher → `python.exe`
+chain with a venv's `pip.exe`.
+
+Tips per tool:
+
+- **NetExec / impacket** speak SMB, LDAP, Kerberos, MSSQL and similar protocols, not HTTP. Route them through a
+  **SOCKS** proxy (a pivot), not Burp. Burp only understands HTTP(S) inside a `CONNECT` tunnel.
+- **Internal hostnames** (`dc01.corp.local`, needed for Kerberos) can't be resolved on your machine. Use
+  `"dns": { "mode": "remote", "remoteDomains": ["corp.local", "*.corp.local"] }` so they resolve on the far side of
+  the pivot. NetExec's own DNS queries (`--dns-server`) are UDP; many SOCKS servers (e.g. `ssh -D`) don't support
+  UDP, so add `--dns-tcp` or use IP addresses.
+- **roadtools** talk HTTPS to Entra ID and Graph, which works well through Burp. Python verifies TLS against its own
+  CA bundle (certifi), not the Windows certificate store. To accept Burp's certificate, point `REQUESTS_CA_BUNDLE`
+  at a PEM file containing Burp's CA. `roadtx` interactive logins start a browser through chromedriver, and
+  `includeChildren` routes that browser too.
+
+Ready-made configs: [`samples/netexec-socks-pivot.json`](samples/netexec-socks-pivot.json) and
+[`samples/roadtools-burp.json`](samples/roadtools-burp.json).
+
 ## Known limitations
 
-- Only **TCP** is captured yet. UDP (including QUIC and DNS) is not touched, so it goes direct. Most browsers fall
-  back to TCP when QUIC fails, but nothing forces that yet.
+- **UDP** goes through a proxy only when the rule's target is a single SOCKS5 proxy. For HTTP or SOCKS4 proxies and
+  chains, the rule's `udp` setting decides: `block` (default) or `direct`. QUIC (UDP/443) of proxied apps is
+  blocked, so browsers fall back to TCP.
+- **Remote DNS** is machine-wide: Windows resolves names centrally (the DNS Client service), so every program gets
+  fake answers for the names in `remoteDomains`. Programs without a proxy rule still work, because their connections
+  to fake addresses go direct through the relay. Keep `remoteDomains` as narrow as you can. DNS over TCP, DNS servers
+  on loopback and encrypted DNS (DoH) are not intercepted. Proxynator flushes the DNS cache when it starts and stops.
 - **Loopback** connections (to `127.0.0.1` or to the machine's own addresses) are never redirected.
-- `dns.mode: remote` behaves like `sniff` for now.
-- Child-process rules (`includeChildren`) use the parent chain at the time of the connection; children of processes
-  that have already exited are not matched.
 - A rule that would also catch your proxy program's own outbound traffic (for example a catch-all rule while Burp
   runs on the same machine) creates a loop. Put a `direct` rule for the proxy program first.
-- When Windows Defender Firewall is enabled, `proxynatord` adds an inbound rule named "Proxynator relay" for its
-  relay port while it runs, and removes it on exit.
+- When Windows Defender Firewall is enabled, `proxynatord` adds inbound rules named "Proxynator relay" for its
+  relay ports while it runs, and removes them on exit.
 
 ## Building
 
@@ -206,7 +240,7 @@ real `curl.exe` traffic through the WinDivert capture (these need an elevated pr
 
 1. ✅ Core: config, rule engine, proxy protocols, chaining, relay. Cross-platform and unit-tested.
 2. ✅ Windows: kernel-level (`windivert`) TCP capture, service, IPC, basic CLI.
-3. DNS modes, UDP via SOCKS5, QUIC blocking, child-process rules.
+3. ✅ Remote (fake-IP) DNS, UDP via SOCKS5, QUIC blocking, child-process rules that survive launcher exit.
 4. Windows: `injection` capture mode.
 5. Linux: eBPF/nftables capture, `LD_PRELOAD` mode, systemd, `.deb` packages for Ubuntu and Kali.
 6. Cross-platform GUI.

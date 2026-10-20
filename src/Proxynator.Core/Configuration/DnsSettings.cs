@@ -12,6 +12,12 @@ public sealed record DnsSettings
     /// <summary>Address range handed out as fake DNS answers in <see cref="DnsMode.Remote"/>.</summary>
     public string FakeIpRange { get; set; } = DefaultFakeIpRange;
 
+    /// <summary>
+    /// Names answered with fake addresses in <see cref="DnsMode.Remote"/> (wildcards, e.g. <c>*.corp.local</c>).
+    /// <c>*</c> means every name. Names of configured proxies, single-label names and reverse lookups are never faked.
+    /// </summary>
+    public IReadOnlyList<string> RemoteDomains { get; set; } = ["*"];
+
     /// <summary>How long to wait for the client's first bytes when sniffing a hostname.</summary>
     public int SniffTimeoutMs { get; set; } = 250;
 }

@@ -1,0 +1,19 @@
+{
+  "$schema": "../schema/config.schema.json",
+  "version": 1,
+  "settings": {
+    // Internal names (dc01.corp.local) get fake addresses locally and are resolved by the pivot.
+    "dns": { "mode": "remote", "remoteDomains": ["corp.local", "*.corp.local"] }
+  },
+  "proxies": [
+    { "id": "pivot", "type": "socks5", "host": "127.0.0.1", "port": 1080 }
+  ],
+  "rules": [
+    {
+      // pipx runs nxc.exe (a launcher) -> venv python.exe -> python.exe; includeChildren catches the whole chain.
+      "name": "NetExec through the pivot",
+      "match": { "processes": ["nxc.exe", "netexec.exe", "nxcdb.exe"], "includeChildren": true },
+      "action": { "type": "proxy", "target": "pivot", "udp": "block" }
+    }
+  ]
+}

@@ -11,13 +11,16 @@ namespace Proxynator.Platform.Windows;
 
 /// <summary>The Windows platform module.</summary>
 [SupportedOSPlatform("windows")]
-public sealed class WindowsPlatformModule : IPlatformModule
+public sealed class WindowsPlatformModule : IPlatformModule, IDisposable
 {
     private readonly WindowsProcessInfoProvider processInfo = new();
     private readonly WindowsPrivilegeChecker privilegeChecker = new();
 
     /// <inheritdoc />
     public string Name => "Windows";
+
+    /// <inheritdoc />
+    public void Dispose() => processInfo.Dispose();
 
     /// <inheritdoc />
     public CaptureMode DefaultCaptureMode => CaptureMode.WinDivert;

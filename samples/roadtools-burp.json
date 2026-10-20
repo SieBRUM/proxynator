@@ -1,0 +1,15 @@
+{
+  "$schema": "../schema/config.schema.json",
+  "version": 1,
+  "proxies": [
+    { "id": "burp", "type": "http", "host": "127.0.0.1", "port": 8080 }
+  ],
+  "rules": [
+    {
+      // roadtx starts a browser (via chromedriver) for interactive logins; includeChildren routes that too.
+      "name": "roadtools via Burp",
+      "match": { "processes": ["roadrecon.exe", "roadtx.exe"], "includeChildren": true },
+      "action": { "type": "proxy", "target": "burp" }
+    }
+  ]
+}

@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using Proxynator.Core.Configuration;
+using Proxynator.Core.NameResolution;
 using Proxynator.Core.Net;
 using Proxynator.Core.Processes;
 using Proxynator.Core.Proxies;
@@ -25,6 +26,7 @@ public sealed class RelayServer : IAsyncDisposable
     private readonly ITcpConnector connector;
     private readonly ProxyRouteDialer dialer;
     private readonly ILogger logger;
+    private readonly FakeIpPool? fakeIps;
     private readonly CancellationTokenSource shutdown = new();
     private readonly List<Socket> listeners = [];
     private readonly List<Task> acceptLoops = [];
@@ -37,21 +39,26 @@ public sealed class RelayServer : IAsyncDisposable
     /// <param name="processes">Process lookup for rule matching.</param>
     /// <param name="tracker">Receives the active connections.</param>
     /// <param name="logger">Logger.</param>
-    /// <param name="connector">Opens upstream TCP connections; defaults to <see cref="TcpConnector.Default"/>.</param>
+    /// <param name="connector">Opens upstream TCP connections; defaults to a <see cref="TcpConnector"/> using <paramref name="resolver"/>.</param>
+    /// <param name="fakeIps">The fake-IP pool, when fake-IP DNS can be active; connections to its addresses are mapped back to hostnames.</param>
+    /// <param name="resolver">Resolves hostnames for direct connections; defaults to the system resolver.</param>
     public RelayServer(
         ConfigurationStore configuration,
         IOriginalDestinationTable destinations,
         IProcessInfoProvider processes,
         ConnectionTracker tracker,
         ILogger<RelayServer> logger,
-        ITcpConnector? connector = null)
+        ITcpConnector? connector = null,
+        FakeIpPool? fakeIps = null,
+        IHostResolver? resolver = null)
     {
         this.configuration = configuration;
         this.destinations = destinations;
         this.processes = processes;
         this.tracker = tracker;
         this.logger = logger;
-        this.connector = connector ?? TcpConnector.Default;
+        this.fakeIps = fakeIps;
+        this.connector = connector ?? new TcpConnector(resolver: resolver);
         dialer = new ProxyRouteDialer(this.connector);
     }
 
@@ -185,11 +192,26 @@ public sealed class RelayServer : IAsyncDisposable
 
         var active = configuration.Current;
         var settings = active.Settings;
+        IPAddress? address = original.Destination.Address.Normalize();
+        var hostname = original.Hostname;
+        if (fakeIps?.Contains(address) == true)
+        {
+            // A fake-IP DNS answer: the hostname is the real destination; the address means nothing outside this machine.
+            if (hostname is null && !fakeIps.TryGetHostname(address, out hostname))
+            {
+                RelayLog.UnknownFakeAddress(logger, address);
+                Reset(clientSocket);
+                return;
+            }
+
+            address = null;
+        }
+
         var context = new ConnectionContext(
             processes.GetProcessInfo(original.ProcessId),
             TransportProtocol.Tcp,
-            original.Destination.Address.Normalize(),
-            original.Hostname,
+            address,
+            hostname,
             original.Destination.Port);
         var decision = active.Rules.Evaluate(context);
 
@@ -197,14 +219,14 @@ public sealed class RelayServer : IAsyncDisposable
         var prelude = ClientPrelude.None;
         try
         {
-            // Remote (fake-IP) DNS is not implemented yet; until it is, it also recovers hostnames by sniffing.
+            // In remote mode, names that were not faked (excluded domains, hosts file entries) are sniffed as well.
             if (settings.Dns.Mode != DnsMode.Local && context.DestinationHost is null &&
                 (decision.Action == RuleActionType.Proxy || active.Rules.UsesHostCriteria))
             {
                 prelude = await ClientPrelude.ReadAsync(clientStream, TimeSpan.FromMilliseconds(settings.Dns.SniffTimeoutMs), cancellationToken).ConfigureAwait(false);
-                if (prelude.Hostname is { } hostname)
+                if (prelude.Hostname is { } sniffed)
                 {
-                    context = context with { DestinationHost = hostname };
+                    context = context with { DestinationHost = sniffed };
                     decision = active.Rules.Evaluate(context);
                 }
             }

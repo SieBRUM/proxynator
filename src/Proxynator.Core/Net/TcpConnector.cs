@@ -1,11 +1,13 @@
 using System.Net;
 using System.Net.Sockets;
+using Proxynator.Core.NameResolution;
 
 namespace Proxynator.Core.Net;
 
 /// <summary>Default <see cref="ITcpConnector"/> using plain sockets.</summary>
 /// <param name="configureSocket">Optional hook to set socket options before connecting.</param>
-public sealed class TcpConnector(Action<Socket>? configureSocket = null) : ITcpConnector
+/// <param name="resolver">Resolves hostnames; defaults to the system resolver.</param>
+public sealed class TcpConnector(Action<Socket>? configureSocket = null, IHostResolver? resolver = null) : ITcpConnector
 {
     /// <summary>A connector without socket customisation.</summary>
     public static TcpConnector Default { get; } = new();
@@ -17,7 +19,7 @@ public sealed class TcpConnector(Action<Socket>? configureSocket = null) : ITcpC
 
         IPAddress[] addresses = endpoint.Address is { } known
             ? [known]
-            : await System.Net.Dns.GetHostAddressesAsync(endpoint.Host!, cancellationToken).ConfigureAwait(false);
+            : await (resolver ?? SystemHostResolver.Instance).ResolveAsync(endpoint.Host!, cancellationToken).ConfigureAwait(false);
 
         if (addresses.Length == 0)
         {

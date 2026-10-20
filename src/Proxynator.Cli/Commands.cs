@@ -20,7 +20,8 @@ internal sealed class Commands(string endpoint, TextWriter output, TextWriter er
             output.WriteLine($"              {status.Capture.Detail}");
         }
 
-        output.WriteLine($"Relay:        {string.Join(", ", status.RelayEndpoints)}");
+        output.WriteLine($"Relay:        TCP {string.Join(", ", status.RelayEndpoints)}; UDP {string.Join(", ", status.UdpRelayEndpoints)}");
+        output.WriteLine($"DNS mode:     {status.DnsMode}{(status.DnsMode == "remote" ? $" ({status.FakeIpCount} name(s) on fake addresses)" : string.Empty)}");
         output.WriteLine($"Config:       {status.ConfigPath} ({status.RuleCount} active rule(s))");
         output.WriteLine($"Connections:  {status.ActiveConnections} active");
         output.WriteLine($"Privileged:   {(status.Privileged ? "yes" : "no")}");
@@ -124,6 +125,7 @@ internal sealed class Commands(string endpoint, TextWriter output, TextWriter er
             var rows = response.Connections.Select(c => (IReadOnlyList<string>)
             [
                 c.Id.ToString(CultureInfo.InvariantCulture),
+                c.Protocol,
                 DescribeProcess(c),
                 c.Destination,
                 c.Rule,
@@ -132,7 +134,7 @@ internal sealed class Commands(string endpoint, TextWriter output, TextWriter er
                 Format.Bytes(c.BytesReceived),
                 Format.Duration(now - c.StartedAt.ToDateTimeOffset()),
             ]);
-            Format.Table(output, ["ID", "PROCESS", "DESTINATION", "RULE", "VIA", "SENT", "RECEIVED", "AGE"], rows);
+            Format.Table(output, ["ID", "PROTO", "PROCESS", "DESTINATION", "RULE", "VIA", "SENT", "RECEIVED", "AGE"], rows);
         }
 
         if (!follow)
@@ -148,7 +150,7 @@ internal sealed class Commands(string endpoint, TextWriter output, TextWriter er
             {
                 var c = connectionEvent.Connection;
                 output.WriteLine(connectionEvent.Kind == ConnectionEvent.Types.Kind.Opened
-                    ? $"+ #{c.Id} {DescribeProcess(c)} -> {c.Destination}  [{c.Rule}] {(c.Action == "proxy" ? "via " + c.Route : c.Action)}"
+                    ? $"+ #{c.Id} {c.Protocol} {DescribeProcess(c)} -> {c.Destination}  [{c.Rule}] {(c.Action == "proxy" ? "via " + c.Route : c.Action)}"
                     : $"- #{c.Id} {c.Destination} closed: {Format.Bytes(c.BytesSent)} sent, {Format.Bytes(c.BytesReceived)} received");
             }
         }

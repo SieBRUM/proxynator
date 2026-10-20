@@ -27,6 +27,9 @@ internal static partial class RelayLog
     [LoggerMessage(EventId = 1006, Level = LogLevel.Error, Message = "Accepting a relay connection failed")]
     public static partial void AcceptFailed(ILogger logger, Exception exception);
 
+    [LoggerMessage(EventId = 1008, Level = LogLevel.Warning, Message = "Refusing a connection to fake address {Address}: it is not mapped to a hostname (expired, or from before a restart)")]
+    public static partial void UnknownFakeAddress(ILogger logger, IPAddress address);
+
     [LoggerMessage(EventId = 1007, Level = LogLevel.Error, Message = "Unexpected error while relaying a connection")]
     public static partial void UnexpectedError(ILogger logger, Exception exception);
 }
