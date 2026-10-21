@@ -28,7 +28,8 @@ public static class LinuxTerminals
         {
             foreach (var directory in directories)
             {
-                var candidate = Path.Combine(directory, program);
+                // Linux paths, also when this logic is tested on Windows.
+                var candidate = $"{directory.TrimEnd('/')}/{program}";
                 if (fileExists(candidate))
                 {
                     return new Terminal(candidate, prefix);
