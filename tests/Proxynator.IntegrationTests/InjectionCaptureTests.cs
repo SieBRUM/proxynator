@@ -94,7 +94,7 @@ public sealed class InjectionCaptureTests : IAsyncLifetime
         var exitCode = await program.WaitForExitAsync(TestTimeout.Token(60));
 
         Assert.Equal(0, exitCode);
-        Assert.Equal("fetch.cmd", program.Name);
+        Assert.Equal("fetch.cmd", program.Name, ignoreCase: true); // the extension comes from PATHEXT (.CMD)
         Assert.Contains(proxy.Requests, r => (r.Host, r.Port) == (Target, 80));
     }
 
