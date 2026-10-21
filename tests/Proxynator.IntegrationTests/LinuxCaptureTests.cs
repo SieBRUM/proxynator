@@ -174,6 +174,35 @@ public sealed class LinuxCaptureTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// "Only corp.local through the proxy", by name, for every program: DNS answers and the rule cover *corp.local
+    /// only. dc01.corp.local (which only the far side knows) goes through the proxy; other hosts go direct.
+    /// </summary>
+    [Theory]
+    [InlineData("ebpf")]
+    [InlineData("preload")]
+    public async Task Only_hosts_under_a_domain_go_through_the_proxy(string mode)
+    {
+        Requirements.RootLinux();
+        await using var service = await StartAsync(mode, """{ "hosts": ["*corp.local"] }""", dnsMode: "remote", remoteDomains: "\"*corp.local\"");
+        var output = Path.Combine(directory, "page.txt");
+        string[] curl = ["-4", "-sS", "--max-time", "20", "-o", output, "-w", "%{http_code}"];
+
+        var (exitCode, status, error) = await RunCapturedAsync(service, mode, "curl", [.. curl, $"http://dc01.corp.local:{target.Endpoint.Port}/test.html"]);
+
+        Assert.True(exitCode == 0, $"curl dc01.corp.local failed ({exitCode}): {error}");
+        Assert.Equal("200", status);
+        Assert.Equal(("dc01.corp.local", target.Endpoint.Port), (proxy.Requests.Single().Host, proxy.Requests.Single().Port));
+
+        // Any other host: not through the proxy (the relay may still see it, reading the Host header, and connects directly).
+        (exitCode, status, error) = await RunCapturedAsync(service, mode, "curl", [.. curl, "-H", "Host: www.google.com", target.Url()]);
+
+        Assert.True(exitCode == 0, $"curl www.google.com failed ({exitCode}): {error}");
+        Assert.Equal("200", status);
+        Assert.Single(proxy.Requests);
+        Assert.Equal(2, target.Requests);
+    }
+
+    /// <summary>
     /// LDAP to a domain controller behind a pivot: the name only resolves on the far side (remote DNS), the proxy gets
     /// it, and a real LDAP client (curl with OpenLDAP) completes a bind and a search.
     /// </summary>
@@ -310,6 +339,10 @@ public sealed class LinuxCaptureTests : IAsyncLifetime
     private static Task<(int ExitCode, string Output, string Error)> CurlAsync(string url, params string[] extra) =>
         Tool.RunAsync("curl", [.. CurlArguments, .. extra, url]);
 
+    /// <summary>Runs a program captured by <paramref name="mode"/>: preloaded in preload mode, as is otherwise.</summary>
+    private static Task<(int ExitCode, string Output, string Error)> RunCapturedAsync(IntegrationService service, string mode, string program, string[] arguments) =>
+        mode == "preload" ? RunPreloadedAsync(service, program, arguments) : Tool.RunAsync(program, arguments);
+
     private static Task<(int ExitCode, string Output, string Error)> RunPreloadedAsync(IntegrationService service, string program, string[] arguments) =>
         RunAsync(PreloadLauncher.CreateStartInfo(program, arguments, IpcEndpoint.HookEndpoint(service.Endpoint), null));
 
@@ -332,13 +365,13 @@ public sealed class LinuxCaptureTests : IAsyncLifetime
         return path;
     }
 
-    private Task<IntegrationService> StartAsync(string mode, string match, string dnsMode = "sniff", string? action = null) =>
+    private Task<IntegrationService> StartAsync(string mode, string match, string dnsMode = "sniff", string? action = null, string remoteDomains = "\"*.proxynator.test\"") =>
         IntegrationService.StartAsync(directory, $$"""
             {
               "version": 1,
               "settings": {
                 "capture": { "mode": "{{mode}}" },
-                "dns": { "mode": "{{dnsMode}}", "remoteDomains": ["*.proxynator.test"] }
+                "dns": { "mode": "{{dnsMode}}", "remoteDomains": [{{remoteDomains}}] }
               },
               "proxies": [
                 { "id": "socks", "type": "socks5", "host": "127.0.0.1", "port": {{proxy.Endpoint.Port}} },

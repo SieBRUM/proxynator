@@ -174,6 +174,40 @@ first.
 On Linux, process names have no `.exe`: `curl`, `nxc`, `python3`. Patterns with a `/` match full paths, e.g.
 `"*/pipx/venvs/netexec/*"`.
 
+### Only some names through the proxy
+
+Want `corp.local` through the pivot and the rest of the internet left alone? Pick the names twice: once for DNS, once
+for the traffic ([`samples/internal-domain-via-pivot.json`](samples/internal-domain-via-pivot.json)):
+
+```json
+{
+  "version": 1,
+  "settings": {
+    "dns": { "mode": "remote", "remoteDomains": ["*corp.local"] }
+  },
+  "proxies": [ { "id": "pivot", "type": "socks5", "host": "127.0.0.1", "port": 1080 } ],
+  "rules": [
+    { "name": "corp.local via the pivot", "match": { "hosts": ["*corp.local"] }, "action": { "type": "proxy", "target": "pivot" } }
+  ]
+}
+```
+
+- **DNS:** lookups of names matching `remoteDomains` never leave your machine. They get a placeholder address, and
+  the proxy resolves the real name on the far side, so `dc01.corp.local` works even though only the target network
+  knows it. Every other lookup (`google.com`) goes to your normal DNS server, untouched. Add `remoteServer` to send
+  SRV/TXT lookups for those names (domain controller discovery) to a DNS server behind the proxy.
+- **Traffic:** the rule sends connections to matching hostnames through the proxy. Nothing else matches, so it goes
+  direct.
+
+Result: `curl http://dc01.corp.local/test.html` goes through the pivot, `curl https://google.com` doesn't. `*corp.local`
+matches `corp.local` itself and every name under it (`*.corp.local` would skip the bare domain). The rule has no
+process, so it applies to every program; add `"processes": [...]` to narrow it. In the GUI: **Settings → DNS mode:
+remote, Remote domains**, and a rule with **Hosts** on the **Rules** page.
+
+One honest footnote: in the machine-wide modes (`windivert`, `ebpf`) a hostname rule can't know a connection's
+hostname when it starts, so other connections pass through Proxynator's local relay too, which reads the name
+(TLS SNI / HTTP `Host`) and then connects them directly. They never touch the proxy.
+
 The format is described by [`schema/config.schema.json`](schema/config.schema.json); [`samples/`](samples/) has
 ready-made configs. The loader is strict: unknown properties, typos and references to proxies that don't exist are
 reported with their location, and an invalid file is never half applied.

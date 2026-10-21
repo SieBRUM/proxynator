@@ -1,0 +1,21 @@
+{
+  "$schema": "../schema/config.schema.json",
+  "version": 1,
+  "settings": {
+    "dns": {
+      "mode": "remote",
+      "remoteDomains": ["*corp.local"],
+      "remoteServer": { "address": "10.0.0.10", "via": "pivot" }
+    }
+  },
+  "proxies": [
+    { "id": "pivot", "type": "socks5", "host": "127.0.0.1", "port": 1080 }
+  ],
+  "rules": [
+    {
+      "name": "corp.local via the pivot",
+      "match": { "hosts": ["*corp.local"] },
+      "action": { "type": "proxy", "target": "pivot" }
+    }
+  ]
+}

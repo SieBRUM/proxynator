@@ -32,7 +32,7 @@ public sealed class WinDivertCaptureTests : IAsyncLifetime
         {
             // LDAP and DNS go to the stand-in domain controller (TEST-NET addresses, unreachable for real).
             Resolve = request => request.Port == 389 ? ldap.Endpoint : request.Port == 53 && request.Udp is false ? domainDns.Endpoint : new IPEndPoint(
-                request.Address ?? (request.Host == Target
+                request.Address ?? (request.Host == Target || request.Host!.EndsWith("corp.local", StringComparison.OrdinalIgnoreCase)
                     ? targetAddress
                     : System.Net.Dns.GetHostAddresses(request.Host!).First(a => a.AddressFamily == AddressFamily.InterNetwork)),
                 request.Port),
@@ -163,6 +163,37 @@ public sealed class WinDivertCaptureTests : IAsyncLifetime
         Assert.True(exitCode == 0, $"curl failed ({exitCode}): {error}");
         Assert.StartsWith("200 198.18.", output, StringComparison.Ordinal); // fake address, real connection via the relay
         Assert.Empty(proxy.Requests);
+    }
+
+    /// <summary>
+    /// "Only corp.local through the proxy", for every program: DNS answers and the rule cover *corp.local only. A name
+    /// only the far side knows (dc01.corp.local) gets a fake address and goes through the proxy; example.com resolves
+    /// normally (a real address) and goes direct.
+    /// </summary>
+    [Fact]
+    public async Task Only_hosts_under_a_domain_go_through_the_proxy()
+    {
+        Requirements.ElevatedWindows();
+        await using var service = await StartAsync($$"""
+            {
+              "version": 1,
+              "settings": { "capture": { "mode": "windivert" }, "dns": { "mode": "remote", "remoteDomains": ["*corp.local"] } },
+              "proxies": [ { "id": "socks", "type": "socks5", "host": "127.0.0.1", "port": {{proxy.Endpoint.Port}} } ],
+              "rules": [ { "name": "corp.local via the proxy", "match": { "hosts": ["*corp.local"] }, "action": { "type": "proxy", "target": "socks" } } ]
+            }
+            """);
+
+        var (exitCode, output, error) = await Curl.RunAsync("http://dc01.corp.local/test.html", "%{http_code} %{remote_ip}");
+
+        Assert.True(exitCode == 0, $"curl dc01.corp.local failed ({exitCode}): {error}");
+        Assert.StartsWith("198.18.", output.Split(' ')[1], StringComparison.Ordinal);
+        Assert.Equal(("dc01.corp.local", 80), (proxy.Requests.Single().Host, proxy.Requests.Single().Port));
+
+        (exitCode, output, error) = await Curl.RunAsync($"http://{Target}/", "%{http_code} %{remote_ip}");
+
+        Assert.True(exitCode == 0, $"curl {Target} failed ({exitCode}): {error}");
+        Assert.Equal($"200 {targetAddress}", output);
+        Assert.Single(proxy.Requests);
     }
 
     /// <summary>LDAP from Windows' own LDAP client (curl.exe uses WinLDAP) to a "domain controller" behind the proxy.</summary>

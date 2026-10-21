@@ -130,6 +130,27 @@ public class DnsTests
         Assert.Equal(expected, active.ShouldFakeResolve(name));
     }
 
+    /// <summary>
+    /// "Only corp.local through the proxy": a leading * without a dot also covers the domain itself; everything else
+    /// resolves normally.
+    /// </summary>
+    [Theory]
+    [InlineData("dc01.corp.local", true)]
+    [InlineData("corp.local", true)]
+    [InlineData("dc01.corp.local.", true)]
+    [InlineData("google.com", false)]
+    [InlineData("www.google.com", false)]
+    [InlineData("corp.local.example.com", false)]
+    public void A_leading_wildcard_fakes_a_domain_and_its_subdomains(string name, bool expected)
+    {
+        var active = ActiveConfiguration.Create(Configs.Minimal() with
+        {
+            Settings = new ProxynatorSettings { Dns = new DnsSettings { Mode = DnsMode.Remote, RemoteDomains = ["*corp.local"] } },
+        });
+
+        Assert.Equal(expected, active.ShouldFakeResolve(name));
+    }
+
     [Fact]
     public void Default_remote_domains_fake_everything_except_special_names()
     {
