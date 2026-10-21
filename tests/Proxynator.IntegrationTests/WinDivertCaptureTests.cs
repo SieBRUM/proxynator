@@ -192,7 +192,9 @@ public sealed class WinDivertCaptureTests : IAsyncLifetime
         (exitCode, output, error) = await Curl.RunAsync($"http://{Target}/", "%{http_code} %{remote_ip}");
 
         Assert.True(exitCode == 0, $"curl {Target} failed ({exitCode}): {error}");
-        Assert.Equal($"200 {targetAddress}", output);
+        var parts = output.Split(' ');
+        Assert.Equal("200", parts[0]);
+        Assert.False(parts[1].StartsWith("198.18.", StringComparison.Ordinal), $"{Target} got a fake address: {output}"); // one of its real addresses
         Assert.Single(proxy.Requests);
     }
 
