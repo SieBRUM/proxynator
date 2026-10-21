@@ -1,5 +1,9 @@
 name: CI
 
+# Every push and pull request: build, unit tests and end-to-end capture tests on every supported platform, and the
+# packages for it. Pushes to main additionally publish those packages as a GitHub release (job "release"), only after
+# every platform passed.
+
 on:
   push:
   pull_request:
@@ -20,11 +24,18 @@ env:
 
 jobs:
   build-and-test:
-    name: Build and test (${{ matrix.os }})
+    name: Build and test (${{ matrix.rid }})
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        include:
+          # Windows arm64 is not built: WinDivert has no arm64 driver and the hook DLLs are x64/x86.
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -33,13 +44,18 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Version
+        shell: bash
+        run: echo "VERSION=$(./build/version.sh)" >> "$GITHUB_ENV"
+
       # The injection mode's hook DLLs (C++, Microsoft Detours), x64 and x86. Built first: the .NET build copies them.
       - name: Build hook DLLs
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./build/build-native.ps1
 
-      # The Linux capture parts (eBPF programs, LD_PRELOAD library). Built first: the .NET build copies them.
+      # The Linux capture parts (eBPF programs, LD_PRELOAD library) for this architecture. Built first: the .NET
+      # build copies them.
       - name: Build Linux capture parts
         if: runner.os == 'Linux'
         run: |
@@ -71,36 +87,55 @@ jobs:
           PROXYNATOR_REQUIRE_INTEGRATION: '1'
         run: dotnet test tests/Proxynator.IntegrationTests -c Release --no-build --logger "trx;LogFileName=integration.trx" --logger "console;verbosity=detailed" --results-directory TestResults
 
-      # A self-contained build packaged as a .deb for Ubuntu and Kali (proxynatord, proxynator, proxynator-gui, the
-      # eBPF object, the preload library, a systemd unit, a desktop entry and a default configuration).
-      - name: Build Debian package
+      # Self-contained builds (no .NET install needed) of proxynatord, proxynator and proxynator-gui with the native
+      # capture parts: a .deb (Ubuntu, Kali) and a .tar.gz (other distributions) per architecture.
+      - name: Build Linux packages
         if: runner.os == 'Linux'
         run: |
-          dotnet publish src/Proxynator.Service -c Release -r linux-x64 --self-contained -o publish/linux-x64
-          dotnet publish src/Proxynator.Cli -c Release -r linux-x64 --self-contained -o publish/linux-x64
-          dotnet publish src/Proxynator.Gui -c Release -r linux-x64 --self-contained -o publish/linux-x64
-          ./build/package-deb.sh publish/linux-x64 0.1.0 publish
-
-      - name: Upload Debian package
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: proxynator-linux-x64-deb
-          path: publish/*.deb
+          for project in Service Cli Gui; do
+            dotnet publish src/Proxynator.$project -c Release -r ${{ matrix.rid }} --self-contained -p:Version=$VERSION -p:GenerateDocumentationFile=false -o publish/${{ matrix.rid }}
+          done
+          ./build/package-deb.sh publish/${{ matrix.rid }} "$VERSION" packages
+          ./build/package-tar.sh publish/${{ matrix.rid }} "$VERSION" ${{ matrix.rid }} packages
 
       # Real traffic through the eBPF programs and the preload library (curl, sh, python3). Needs root; the
-      # variable turns a skip into a failure. Runs last, as root, so it cannot leave root-owned files behind for
-      # the other steps.
+      # variable turns a skip into a failure. Runs after the other build steps, as root, so it cannot leave
+      # root-owned files behind for them.
       - name: Integration tests (eBPF, preload)
         if: runner.os == 'Linux'
         run: sudo -E env "PATH=$PATH" "DOTNET_ROOT=${DOTNET_ROOT:-}" PROXYNATOR_REQUIRE_INTEGRATION=1 dotnet test tests/Proxynator.IntegrationTests -c Release --no-build --logger "trx;LogFileName=integration.trx" --logger "console;verbosity=detailed" --results-directory TestResults
+
+      # A self-contained .zip with proxynatord, proxynator, proxynator-gui, the WinDivert driver and the hook DLLs.
+      - name: Build Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = "publish/proxynator-$env:VERSION-win-x64"
+          foreach ($project in 'Service', 'Cli', 'Gui') {
+            dotnet publish src/Proxynator.$project -c Release -r win-x64 --self-contained -p:Version=$env:VERSION -p:GenerateDocumentationFile=false -o $out
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          foreach ($file in 'proxynatord.exe', 'proxynator.exe', 'proxynator-gui.exe', 'WinDivert.dll', 'WinDivert64.sys', 'proxynator-hook64.dll', 'proxynator-hook32.dll') {
+            if (-not (Test-Path "$out/$file")) { throw "missing $out/$file" }
+          }
+          New-Item -ItemType Directory -Force "$out/samples", packages | Out-Null
+          Copy-Item samples/*.json "$out/samples/"
+          Copy-Item LICENSE, NOTICE, README.md $out
+          Compress-Archive -Path $out -DestinationPath "packages/proxynator-$env:VERSION-win-x64.zip"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.rid }}
+          path: packages/*
+          if-no-files-found: error
 
       # Screenshots of every GUI page, rendered by the headless GUI tests.
       - name: Upload GUI screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gui-screenshots-${{ matrix.os }}
+          name: gui-screenshots-${{ matrix.rid }}
           path: tests/Proxynator.Gui.Tests/bin/Release/net10.0/screenshots
           if-no-files-found: ignore
 
@@ -108,25 +143,48 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.os }}
+          name: test-results-${{ matrix.rid }}
           path: TestResults
           if-no-files-found: ignore
 
-      # A self-contained build (no .NET install needed) with proxynatord, proxynator, proxynator-gui, the WinDivert
-      # driver and the hook DLLs.
-      - name: Publish Windows build
-        if: runner.os == 'Windows'
-        run: |
-          dotnet publish src/Proxynator.Service -c Release -r win-x64 --self-contained -o publish/proxynator-win-x64
-          dotnet publish src/Proxynator.Cli -c Release -r win-x64 --self-contained -o publish/proxynator-win-x64
-          dotnet publish src/Proxynator.Gui -c Release -r win-x64 --self-contained -o publish/proxynator-win-x64
-          New-Item -ItemType Directory -Force publish/proxynator-win-x64/samples | Out-Null
-          Copy-Item samples/*.json publish/proxynator-win-x64/samples/
-          Copy-Item LICENSE, NOTICE publish/proxynator-win-x64/
+  # Pushes to main: every platform's packages, tested above, become a GitHub release v<major>.<minor>.<run number>.
+  release:
+    name: Release
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Upload Windows build
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+      - name: Version
+        run: echo "VERSION=$(./build/version.sh)" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
         with:
-          name: proxynator-win-x64
-          path: publish/proxynator-win-x64
+          pattern: packages-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<NOTES
+          Built and tested by CI from ${GITHUB_SHA}: unit tests and real-traffic capture tests on every platform below.
+
+          | Platform | Package |
+          |---|---|
+          | Windows 10/11 x64 | \`proxynator-${VERSION}-win-x64.zip\`: unzip, run \`proxynatord.exe\` as Administrator |
+          | Ubuntu / Kali x64 | \`proxynator_${VERSION}_amd64.deb\`: \`sudo apt install ./proxynator_${VERSION}_amd64.deb\` |
+          | Ubuntu / Kali arm64 | \`proxynator_${VERSION}_arm64.deb\` |
+          | Other Linux x64 / arm64 | \`proxynator-${VERSION}-linux-x64.tar.gz\` / \`-linux-arm64.tar.gz\`: unpack, run \`proxynatord\` as root (systemd unit and desktop entry in \`packaging/\`) |
+
+          Each package contains the service (\`proxynatord\`), the CLI (\`proxynator\`) and the GUI (\`proxynator-gui\`). \`SHA256SUMS\` lists the checksums.
+          NOTES
+          gh release create "v${VERSION}" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Proxynator ${VERSION}" --notes-file notes.md --generate-notes

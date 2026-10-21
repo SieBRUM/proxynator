@@ -93,10 +93,23 @@ which is the one part of this plan that is actually well thought out.
 ## Requirements
 
 - **Windows 10/11 x64.** `proxynatord` must run as Administrator; it checks at startup and refuses otherwise.
-- **Linux x64:** Ubuntu 22.04+ or Kali rolling (other systemd distributions likely work). `proxynatord` needs root
+- **Linux x64 or arm64:** Ubuntu 22.04+ or Kali rolling (other systemd distributions likely work). `proxynatord` needs root
   (or `CAP_NET_ADMIN` + `CAP_BPF` + `CAP_PERFMON`). The `ebpf` mode needs cgroup v2, kernel BTF and `libbpf`
   (`libbpf1`, or `libbpf0` on 22.04), all standard on those systems.
-- Nothing else for the self-contained builds and the `.deb`.
+- Nothing else: every package is self-contained.
+- Not supported: Windows on ARM (WinDivert has no ARM64 driver) and macOS (no capture backend). Yet. *Curse you,
+  instruction set architectures!*
+
+Every push to `main` that passes all tests on all platforms becomes a
+[release](https://github.com/SieBRUM/proxynator/releases/latest) with these packages:
+
+| Platform | Package |
+|---|---|
+| Windows 10/11 x64 | `proxynator-<version>-win-x64.zip` |
+| Ubuntu / Kali x64, arm64 | `proxynator_<version>_amd64.deb`, `proxynator_<version>_arm64.deb` |
+| Other Linux x64, arm64 | `proxynator-<version>-linux-x64.tar.gz`, `proxynator-<version>-linux-arm64.tar.gz` |
+
+Each contains the service, the CLI and the GUI; `SHA256SUMS` has the checksums.
 
 Security software may flag WinDivert, the hook DLL or the preload library: they capture packets and hook functions,
 which is exactly what they're for. Proxynator does not try to evade detection. It's evil in name only.
@@ -167,9 +180,10 @@ reported with their location, and an invalid file is never half applied.
 
 ## Getting started (Windows)
 
-1. **Get a build.** Download the `proxynator-win-x64` artifact from the latest successful
-   [CI run](https://github.com/SieBRUM/proxynator/actions/workflows/ci.yml). It is self-contained and includes the
-   WinDivert driver, the hook DLLs and the GUI (`proxynator-gui.exe`). Or build it yourself (see [Building](#building)).
+1. **Get a build.** Download `proxynator-<version>-win-x64.zip` from the
+   [latest release](https://github.com/SieBRUM/proxynator/releases/latest) and unzip it. It is self-contained and
+   includes the WinDivert driver, the hook DLLs and the GUI (`proxynator-gui.exe`). Or build it yourself (see
+   [Building](#building)).
 2. **Start the service** from an elevated PowerShell (*Run as administrator*):
    ```
    .\proxynatord.exe --config .\config.json
@@ -199,14 +213,14 @@ When the service runs as LocalSystem, run the CLI elevated.
 
 ## Getting started (Linux)
 
-1. **Get the package.** Download the `proxynator-linux-x64-deb` artifact from the latest successful
-   [CI run](https://github.com/SieBRUM/proxynator/actions/workflows/ci.yml) and install it:
+1. **Get the package.** Download the `.deb` for your architecture (`amd64` or `arm64`) from the
+   [latest release](https://github.com/SieBRUM/proxynator/releases/latest) and install it:
    ```
-   sudo apt install ./proxynator_0.1.0_amd64.deb
+   sudo apt install ./proxynator_<version>_amd64.deb
    ```
    It installs to `/opt/proxynator`, adds `proxynator`, `proxynator-gui` and `proxynatord` to the `PATH`, a systemd
-   unit, a menu entry, a default `/etc/proxynator/config.json` and a `proxynator` group. It does *not* start anything on its own; even evil
-   scientists ask first.
+   unit, a menu entry, a default `/etc/proxynator/config.json` and a `proxynator` group. It does *not* start anything
+   on its own; even evil scientists ask first.
 2. **Configure and start:**
    ```
    sudo cp /usr/share/doc/proxynator/samples/linux-pivot.json /etc/proxynator/config.json
@@ -219,7 +233,8 @@ When the service runs as LocalSystem, run the CLI elevated.
    proxynator connections --follow
    ```
 
-Without the package: `sudo ./proxynatord --config ./config.json` from a build directory works too.
+Without the package (other distributions): unpack the `.tar.gz` and run `sudo ./proxynatord --config ./config.json`;
+`packaging/` has the systemd unit (it expects `/opt/proxynator`) and the desktop entry.
 
 ## GUI
 
@@ -411,7 +426,8 @@ Without them everything still builds, and only the modes that need them stop wor
 ./build/build-native.sh     # Linux: eBPF object and preload library (sudo apt install clang llvm libbpf-dev gcc)
 ```
 
-Self-contained builds and the Debian package:
+Self-contained builds and the Linux packages (`linux-arm64` on an arm64 machine, where `build-native.sh` builds the
+arm64 capture parts):
 
 ```
 dotnet publish src/Proxynator.Service -c Release -r win-x64 --self-contained -o out
@@ -421,14 +437,16 @@ dotnet publish src/Proxynator.Gui -c Release -r win-x64 --self-contained -o out
 dotnet publish src/Proxynator.Service -c Release -r linux-x64 --self-contained -o out
 dotnet publish src/Proxynator.Cli -c Release -r linux-x64 --self-contained -o out
 dotnet publish src/Proxynator.Gui -c Release -r linux-x64 --self-contained -o out
-./build/package-deb.sh out 0.1.0
+./build/package-deb.sh out 0.1.0             # .deb for this machine's architecture
+./build/package-tar.sh out 0.1.0 linux-x64   # .tar.gz
 ```
 
-GitHub Actions builds and tests every push on Windows and Linux, including end-to-end tests that push real traffic
+GitHub Actions builds and tests every push on Windows x64, Linux x64 and Linux arm64, including end-to-end tests that push real traffic
 through all four capture modes (curl, nslookup, PowerShell, Python, pip in a venv, shell scripts, attaching to running
 programs; Windows needs an elevated prompt and Linux needs root: `dotnet test tests/Proxynator.IntegrationTests`).
-It publishes the `proxynator-win-x64` build, the `proxynator-linux-x64-deb` package and screenshots of every GUI page
-(rendered headlessly by the GUI tests).
+Every run builds all packages (artifacts `packages-<platform>`) and screenshots of every GUI page (rendered headlessly
+by the GUI tests). On pushes to `main`, once every platform has passed, the packages are published as release
+`v<major>.<minor>.<run number>` (major and minor from `Directory.Build.props`).
 
 ## Roadmap
 
@@ -439,7 +457,9 @@ It publishes the `proxynator-win-x64` build, the `proxynator-linux-x64-deb` pack
 5. ✅ Linux: `ebpf` and `preload` capture modes, systemd unit, `.deb` packages for Ubuntu and Kali.
 6. ✅ Desktop GUI for Windows and Linux (Avalonia): live connections, rule/proxy/settings editors, launching hooked
    programs and terminals, diagnostics.
-7. Later: connection log export, pcap output, statistics, TLS-to-proxy hops, UDP relaying in the other modes, ARM64.
+7. ✅ Automatic releases for Windows x64, Linux x64 and Linux arm64 (`.zip`, `.deb`, `.tar.gz`).
+8. Later: connection log export, pcap output, statistics, TLS-to-proxy hops, UDP relaying in the other modes,
+   Windows on ARM.
    And maybe a self-destruct button that's actually labelled.
 
 ## Contributing

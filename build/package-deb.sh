@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Builds the Debian package (Ubuntu, Kali) from a self-contained linux-x64 publish directory that contains
-# proxynatord, proxynator, proxynator-gui, proxynator.bpf.o and libproxynator-preload.so.
-#   build/package-deb.sh <publish-dir> <version> [output-dir]
+# Builds the Debian package (Ubuntu, Kali) from a self-contained linux-x64 or linux-arm64 publish directory that
+# contains proxynatord, proxynator, proxynator-gui, proxynator.bpf.o and libproxynator-preload.so.
+#   build/package-deb.sh <publish-dir> <version> [output-dir] [architecture: amd64 | arm64, default: this machine's]
 set -euo pipefail
 
 publish="$(cd "$1" && pwd)"
 version="$2"
 output="${3:-.}"
+arch="${4:-$(dpkg --print-architecture)}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 for file in proxynatord proxynator proxynator-gui proxynator.bpf.o libproxynator-preload.so; do
@@ -15,7 +16,7 @@ done
 
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
-package="$staging/proxynator_${version}_amd64"
+package="$staging/proxynator_${version}_${arch}"
 
 install -d "$package/opt/proxynator" "$package/usr/bin" "$package/usr/sbin" "$package/lib/systemd/system" \
   "$package/etc/proxynator" "$package/usr/share/doc/proxynator" "$package/usr/share/applications" \
@@ -37,7 +38,7 @@ Package: proxynator
 Version: ${version}
 Section: net
 Priority: optional
-Architecture: amd64
+Architecture: ${arch}
 Depends: libc6, libbpf1 | libbpf0
 Recommends: libx11-6, libice6, libsm6, libfontconfig1
 Maintainer: The Proxynator Authors <https://github.com/SieBRUM/proxynator>
@@ -90,4 +91,4 @@ SCRIPT
 
 chmod 0755 "$package/DEBIAN/postinst" "$package/DEBIAN/prerm" "$package/DEBIAN/postrm"
 mkdir -p "$output"
-dpkg-deb --build --root-owner-group "$package" "$output/proxynator_${version}_amd64.deb"
+dpkg-deb --build --root-owner-group "$package" "$output/proxynator_${version}_${arch}.deb"

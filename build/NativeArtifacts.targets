@@ -3,7 +3,8 @@
     Copies the native capture parts next to the application when they have been built:
     - Windows injection mode: proxynator-hook64.dll / proxynator-hook32.dll (build/build-native.ps1)
     - Linux ebpf mode: proxynator.bpf.o; Linux preload mode: libproxynator-preload.so (build/build-native.sh)
-    They are built into artifacts/native/<rid>. Import this file in executable projects; the files flow to projects
+    They are built into artifacts/native/<rid>. The Linux parts are taken for the target runtime (linux-x64 or
+    linux-arm64): the RuntimeIdentifier when publishing for one, otherwise this machine's architecture. Import this file in executable projects; the files flow to projects
     that reference them. Without them everything still builds; the modes that need them report them missing
     (proxynator doctor).
   -->
@@ -11,8 +12,11 @@
     <NativeArtifactsDir>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'artifacts', 'native'))</NativeArtifactsDir>
     <NativeHook64>$(NativeArtifactsDir)win-x64\proxynator-hook64.dll</NativeHook64>
     <NativeHook32>$(NativeArtifactsDir)win-x86\proxynator-hook32.dll</NativeHook32>
-    <NativeBpfObject>$(NativeArtifactsDir)linux-x64/proxynator.bpf.o</NativeBpfObject>
-    <NativePreload>$(NativeArtifactsDir)linux-x64/libproxynator-preload.so</NativePreload>
+    <NativeLinuxRid Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">linux-arm64</NativeLinuxRid>
+    <NativeLinuxRid Condition="'$(NativeLinuxRid)' == '' and '$(RuntimeIdentifier)' == '' and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">linux-arm64</NativeLinuxRid>
+    <NativeLinuxRid Condition="'$(NativeLinuxRid)' == ''">linux-x64</NativeLinuxRid>
+    <NativeBpfObject>$(NativeArtifactsDir)$(NativeLinuxRid)/proxynator.bpf.o</NativeBpfObject>
+    <NativePreload>$(NativeArtifactsDir)$(NativeLinuxRid)/libproxynator-preload.so</NativePreload>
   </PropertyGroup>
 
   <ItemGroup>

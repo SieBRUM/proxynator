@@ -8,7 +8,7 @@ Proxynator forces the network traffic of chosen applications through SOCKS4/4a/5
 
 Proxynator only routes traffic. TLS interception, certificates and request inspection belong to the upstream proxy (Burp etc.). Do not build MITM features into Proxynator.
 
-Targets: **Windows first** (10/11, x64), **Linux second** (Ubuntu LTS and Kali rolling, x64). Everything is designed so Linux slots in as an additional platform module, not a rewrite.
+Targets: **Windows first** (10/11, x64), **Linux second** (Ubuntu LTS and Kali rolling, x64 and arm64). Everything is designed so Linux slots in as an additional platform module, not a rewrite.
 
 ## Golden rules
 
@@ -301,9 +301,12 @@ build/
   WinDivert.targets                pinned WinDivert download + verification, imported by executables
   NativeArtifacts.targets          copies native parts from artifacts/native/<rid>, imported by executables
   build-native.ps1                 builds the hook DLLs (CMake + MSVC, x64 and x86)
-  build-native.sh                  builds proxynator.bpf.o and libproxynator-preload.so (clang, libbpf-dev, gcc)
-  package-deb.sh                   .deb from a linux-x64 publish (systemd unit, /etc config, proxynator group,
+  build-native.sh                  builds proxynator.bpf.o and libproxynator-preload.so for this machine's
+                                   architecture into artifacts/native/linux-x64|linux-arm64 (clang, libbpf-dev, gcc)
+  package-deb.sh                   .deb from a linux-x64/arm64 publish (systemd unit, /etc config, proxynator group,
                                    desktop entry + icon)
+  package-tar.sh                   .tar.gz from a linux-x64/arm64 publish (other distributions)
+  version.sh                       CI version: <major>.<minor> from Directory.Build.props + run number
 native/
   windows/hook/                    C++ Detours hook DLL (x64 + x86)
   linux/preload/                   C LD_PRELOAD library
@@ -375,11 +378,16 @@ On Linux, `-p:IncludeWinDivert=true` forces the WinDivert download (e.g. to chec
 Windows publish (`dotnet publish src/Proxynator.Service -c Release -r win-x64 --self-contained`) can be produced from
 Linux too.
 
-CI (`.github/workflows/ci.yml`) builds and unit-tests in Release on `windows-latest` and `ubuntu-latest`. Windows:
-builds the hook DLLs (x64 + x86) first, runs the WinDivert and injection integration tests (elevated) and uploads a
-self-contained `proxynator-win-x64` build (service, CLI, GUI). Both upload the GUI screenshots (`gui-screenshots-*`). Linux: builds the eBPF object and preload library first, packages and
-uploads `proxynator-linux-x64-deb`, then runs the eBPF and preload integration tests with sudo (last, so no
-root-owned files affect other steps). Tests for the other OS skip; on the right OS a skip is a failure in CI.
+CI (`.github/workflows/ci.yml`) builds and unit-tests in Release on three platforms: `win-x64` (`windows-latest`),
+`linux-x64` (`ubuntu-latest`) and `linux-arm64` (`ubuntu-24.04-arm`). Windows: builds the hook DLLs (x64 + x86) first,
+runs the WinDivert and injection integration tests (elevated) and packages a self-contained `.zip` (service, CLI,
+GUI, WinDivert, hook DLLs). Linux: builds the eBPF object and preload library for the runner's architecture first,
+packages a `.deb` and a `.tar.gz`, then runs the eBPF and preload integration tests with sudo (after the other build
+steps, so no root-owned files affect them). Tests for the other OS skip; on the right OS a skip is a failure in CI.
+Every platform uploads `packages-<rid>`, `gui-screenshots-<rid>` and `test-results-<rid>`. The `release` job runs
+only for pushes to `main`, after all platforms passed: it publishes the packages and `SHA256SUMS` as GitHub release
+`v<major>.<minor>.<run number>` (`build/version.sh`; bump major/minor in `Directory.Build.props`). Not built:
+Windows arm64 (no WinDivert driver, x64/x86 hook DLLs) and macOS (no capture backend).
 
 This container-style environment can run the Linux integration tests too (root, BPF, cgroup v2): `sudo dotnet test
 tests/Proxynator.IntegrationTests --filter FullyQualifiedName~LinuxCaptureTests` after `build/build-native.sh`.
@@ -433,4 +441,5 @@ Windows (WinDivert, Win32) is only exercised by CI's Windows job; check it after
   fallback not implemented: every supported distribution has BPF and BTF.)
 - [x] Phase 6 — Avalonia GUI (`proxynator-gui`): overview, live connections, rule/proxy/chain/settings editors on a
   validated working copy, JSON, launching hooked programs and terminals, attach (Windows), diagnostics.
-- [ ] Later — connection log export, pcap output, statistics, `https` (TLS-to-proxy) hops, ARM64 (Linux first; WinDivert has no ARM64 build).
+- [x] Releases — every push to `main` publishes tested packages for Windows x64, Linux x64 and Linux arm64.
+- [ ] Later — connection log export, pcap output, statistics, `https` (TLS-to-proxy) hops, Windows ARM64 (WinDivert has no ARM64 build; would need ARM64 hook DLLs).
