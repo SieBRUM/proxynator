@@ -17,10 +17,6 @@ internal static partial class Libc
     [LibraryImport("libc", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     public static partial int chown(string path, int owner, int group);
 
-    public const int ORdOnly = 0;
-    public const int ODirectory = 0x10000;
-    public const int OCloexec = 0x80000;
-
     [LibraryImport("libc", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     public static partial int open(string path, int flags);
 

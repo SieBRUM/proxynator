@@ -255,7 +255,7 @@ public sealed partial class BpfCaptureBackend : ICaptureBackend, IOriginalDestin
             links.Add(Check(LibBpf.bpf_program__attach(Program(name)), name));
         }
 
-        var cgroupFd = Libc.open(cgroupPath, Libc.ORdOnly | Libc.ODirectory | Libc.OCloexec);
+        var cgroupFd = Libc.open(cgroupPath, OpenFlags.ReadOnly | OpenFlags.Directory | OpenFlags.CloseOnExec);
         if (cgroupFd < 0)
         {
             throw new InvalidOperationException($"Cannot open {cgroupPath} (errno {Marshal.GetLastPInvokeError()}).");
