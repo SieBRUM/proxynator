@@ -160,7 +160,7 @@ public sealed class InjectionCaptureTests : IAsyncLifetime
         await using var service = await StartAsync(ProxyAllConfig());
 
         // curl.exe's ldap:// uses WinLDAP (wldap32), so this is Windows' own LDAP client inside the hooked process.
-        var exitCode = await RunHookedAsync(service, Path.Combine(System32, "curl.exe"), ["-sS", "--max-time", "20", "-o", Path.Combine(directory, "ldap.txt"), "ldap://203.0.113.10:389/dc=corp,dc=local?cn?sub?(objectClass=*)"]);
+        var exitCode = await RunHookedAsync(service, Path.Combine(System32, "curl.exe"), ["-sS", "--max-time", "20", .. FakeLdapServer.CurlCredentials, "-o", Path.Combine(directory, "ldap.txt"), "ldap://203.0.113.10:389/dc=corp,dc=local?cn?sub?(objectClass=*)"]);
 
         Assert.Equal(0, exitCode);
         Assert.Contains(FakeLdapServer.EntryDn, await File.ReadAllTextAsync(Path.Combine(directory, "ldap.txt")), StringComparison.Ordinal);

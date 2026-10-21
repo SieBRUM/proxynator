@@ -198,7 +198,7 @@ public sealed class LinuxCaptureTests : IAsyncLifetime
         Requirements.RootLinux();
         await using var service = await StartAsync("preload", "{}");
 
-        var (exitCode, output, error) = await RunPreloadedAsync(service, "curl", ["-sS", "--max-time", "20", LdapUrl("203.0.113.10")]);
+        var (exitCode, output, error) = await RunPreloadedAsync(service, "curl", ["-sS", "--max-time", "20", .. FakeLdapServer.CurlCredentials, LdapUrl("203.0.113.10")]);
 
         Assert.True(exitCode == 0, $"curl failed ({exitCode}): {output} {error}");
         Assert.Contains(FakeLdapServer.EntryDn, output, StringComparison.Ordinal);
@@ -262,7 +262,7 @@ public sealed class LinuxCaptureTests : IAsyncLifetime
     private static string LdapUrl(string host) => $"ldap://{host}:389/dc=corp,dc=local?cn?sub?(objectClass=*)";
 
     private static Task<(int ExitCode, string Output, string Error)> LdapSearchAsync(string host) =>
-        Tool.RunAsync("curl", ["-sS", "--max-time", "20", LdapUrl(host)]);
+        Tool.RunAsync("curl", ["-sS", "--max-time", "20", .. FakeLdapServer.CurlCredentials, LdapUrl(host)]);
 
     private static Task<(int ExitCode, string Output, string Error)> CurlAsync(string url, params string[] extra) =>
         Tool.RunAsync("curl", [.. CurlArguments, .. extra, url]);

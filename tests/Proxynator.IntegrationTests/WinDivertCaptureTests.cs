@@ -172,7 +172,7 @@ public sealed class WinDivertCaptureTests : IAsyncLifetime
         Requirements.ElevatedWindows();
         await using var service = await StartAsync(RuleFor("curl.exe", """{ "type": "proxy", "target": "socks" }"""));
 
-        var (exitCode, output, error) = await Tool.RunAsync(Path.Combine(Environment.SystemDirectory, "curl.exe"), ["-sS", "--max-time", "20", LdapUrl]);
+        var (exitCode, output, error) = await Tool.RunAsync(Path.Combine(Environment.SystemDirectory, "curl.exe"), ["-sS", "--max-time", "20", .. FakeLdapServer.CurlCredentials, LdapUrl]);
 
         Assert.True(exitCode == 0, $"curl failed ({exitCode}): {output} {error}");
         Assert.Contains(FakeLdapServer.EntryDn, output, StringComparison.Ordinal);

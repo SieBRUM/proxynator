@@ -8,11 +8,16 @@ namespace Proxynator.IntegrationTests;
 /// <summary>
 /// A minimal LDAPv3 server (BER over TCP, loopback): answers every bind with success and every search with one entry,
 /// <c>cn=proxynator,dc=corp,dc=local</c> (<c>cn: proxynator</c>). Enough for real LDAP clients (curl's ldap:// with
-/// OpenLDAP or WinLDAP) to complete a bind + search through the capture, the relay and a proxy.
+/// OpenLDAP or WinLDAP) to complete a simple bind + search through the capture, the relay and a proxy. SASL binds
+/// (Windows curl's default without credentials: GSS-SPNEGO) are refused with authMethodNotSupported, so tests bind
+/// with a DN and password.
 /// </summary>
 internal sealed class FakeLdapServer : IAsyncDisposable
 {
     public const string EntryDn = "cn=proxynator,dc=corp,dc=local";
+
+    /// <summary>curl arguments for a simple bind (any DN and password are accepted).</summary>
+    public static readonly string[] CurlCredentials = ["--basic", "--user", "cn=reader,dc=corp,dc=local:reader"];
 
     private const byte Sequence = 0x30;
     private const byte BindRequest = 0x60;
@@ -72,7 +77,7 @@ internal sealed class FakeLdapServer : IAsyncDisposable
                     // LDAPMessage ::= SEQUENCE { messageID INTEGER, protocolOp, ... }
                     var position = 0;
                     if (!TryReadElement(message, ref position, out var tag, out var id) || tag != 0x02 ||
-                        !TryReadElement(message, ref position, out var operation, out _))
+                        !TryReadElement(message, ref position, out var operation, out var request))
                     {
                         return;
                     }
@@ -80,9 +85,14 @@ internal sealed class FakeLdapServer : IAsyncDisposable
                     var messageId = id.Aggregate(0, (value, b) => (value << 8) | b);
                     switch (operation)
                     {
-                        case BindRequest:
+                        case BindRequest when IsSimpleBind(request):
                             Operations.Enqueue("bind");
                             await stream.WriteAsync(Message(messageId, Element(0x61, Result())), stop.Token);
+                            break;
+                        case BindRequest:
+                            // SASL (e.g. GSS-SPNEGO with the current Windows user): not supported by this stand-in.
+                            Operations.Enqueue("sasl bind");
+                            await stream.WriteAsync(Message(messageId, Element(0x61, Result(resultCode: 7))), stop.Token);
                             break;
                         case SearchRequest:
                             Operations.Enqueue("search");
@@ -165,8 +175,16 @@ internal sealed class FakeLdapServer : IAsyncDisposable
     private static byte[] Message(int messageId, byte[] operation) =>
         Element(Sequence, [.. Element(0x02, IntegerBytes(messageId)), .. operation]);
 
-    /// <summary>LDAPResult: success, empty matchedDN and diagnosticMessage.</summary>
-    private static byte[] Result() => [.. Element(0x0a, [0]), .. OctetString(string.Empty), .. OctetString(string.Empty)];
+    /// <summary>LDAPResult: the result code (0 = success), empty matchedDN and diagnosticMessage.</summary>
+    private static byte[] Result(byte resultCode = 0) => [.. Element(0x0a, [resultCode]), .. OctetString(string.Empty), .. OctetString(string.Empty)];
+
+    /// <summary>BindRequest ::= { version INTEGER, name OCTET STRING, authentication: simple [0] | sasl [3] }.</summary>
+    private static bool IsSimpleBind(byte[] request)
+    {
+        var position = 0;
+        return TryReadElement(request, ref position, out _, out _) && TryReadElement(request, ref position, out _, out _) &&
+               TryReadElement(request, ref position, out var authentication, out _) && authentication == 0x80;
+    }
 
     private static byte[] OctetString(string value) => Element(0x04, Encoding.UTF8.GetBytes(value));
 
