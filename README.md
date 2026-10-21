@@ -15,7 +15,7 @@ game at Burp Suite, mitmproxy or a SOCKS pivot, *even when that app has no proxy
 > **Status: early, but it works.** Windows: machine-wide kernel capture (`windivert`) or per-program hooking
 > (`injection`). Linux (Ubuntu, Kali): machine-wide eBPF capture (`ebpf`) or per-program `LD_PRELOAD` (`preload`),
 > as a `.deb` with a systemd unit. Fake-IP DNS for resolving internal names through a pivot, all driven by the
-> `proxynator` CLI. A GUI is next. See the [known limitations](#self-destruct-buttons-known-limitations) and the
+> `proxynator` CLI or the desktop GUI. See the [known limitations](#self-destruct-buttons-known-limitations) and the
 > [roadmap](#roadmap).
 
 ## The backstory (why this exists)
@@ -61,7 +61,8 @@ doesn't matter what it thinks of proxy settings.
   direct. Unlike most of my schemes, this one has no "oops, it leaked" ending.
 - ✅ **A self-destruct button:** stop or crash the service and normal networking resumes on its own (WinDivert
   handles close, eBPF links detach). Every good -inator has one.
-- ✅ **Headless service + CLI**, with a cross-platform GUI planned.
+- ✅ **Headless service, CLI and a desktop GUI** (Windows and Linux): watch connections live, edit rules and proxies,
+  launch hooked programs. The GUI doesn't need admin rights; only the service does.
 
 ## The evil scheme (how it works)
 
@@ -87,7 +88,7 @@ which is the one part of this plan that is actually well thought out.
 |-----------|-------------|
 | `proxynatord` | The privileged service/daemon that captures and relays. Foreground, Windows service or systemd unit. |
 | `proxynator` | The CLI. Talks to the service over a local named pipe (`\\.\pipe\proxynator.v1`) or Unix socket (`/run/proxynator/proxynator.sock`). |
-| GUI | Planned. A cross-platform Avalonia app on the same API as the CLI. |
+| `proxynator-gui` | The desktop GUI (Avalonia, Windows and Linux). An unprivileged client on the same API as the CLI. |
 
 ## Requirements
 
@@ -168,7 +169,7 @@ reported with their location, and an invalid file is never half applied.
 
 1. **Get a build.** Download the `proxynator-win-x64` artifact from the latest successful
    [CI run](https://github.com/SieBRUM/proxynator/actions/workflows/ci.yml). It is self-contained and includes the
-   WinDivert driver and the hook DLLs. Or build it yourself (see [Building](#building)).
+   WinDivert driver, the hook DLLs and the GUI (`proxynator-gui.exe`). Or build it yourself (see [Building](#building)).
 2. **Start the service** from an elevated PowerShell (*Run as administrator*):
    ```
    .\proxynatord.exe --config .\config.json
@@ -185,6 +186,7 @@ reported with their location, and an invalid file is never half applied.
    ```
    .\proxynator.exe connections --follow
    ```
+   Or do all of the above (except starting the service) in `proxynator-gui.exe`.
 
 To run it as a Windows service (elevated prompt, full path to `proxynatord.exe`):
 
@@ -202,15 +204,15 @@ When the service runs as LocalSystem, run the CLI elevated.
    ```
    sudo apt install ./proxynator_0.1.0_amd64.deb
    ```
-   It installs to `/opt/proxynator`, adds `proxynator` and `proxynatord` to the `PATH`, a systemd unit, a default
-   `/etc/proxynator/config.json` and a `proxynator` group. It does *not* start anything on its own; even evil
+   It installs to `/opt/proxynator`, adds `proxynator`, `proxynator-gui` and `proxynatord` to the `PATH`, a systemd
+   unit, a menu entry, a default `/etc/proxynator/config.json` and a `proxynator` group. It does *not* start anything on its own; even evil
    scientists ask first.
 2. **Configure and start:**
    ```
    sudo cp /usr/share/doc/proxynator/samples/linux-pivot.json /etc/proxynator/config.json
    sudo systemctl enable --now proxynatord
    ```
-3. **Use the CLI** as root, or add yourself to the group (log in again afterwards):
+3. **Use the CLI or the GUI** as root, or add yourself to the group (log in again afterwards):
    ```
    sudo usermod -aG proxynator "$USER"
    proxynator doctor
@@ -218,6 +220,35 @@ When the service runs as LocalSystem, run the CLI elevated.
    ```
 
 Without the package: `sudo ./proxynatord --config ./config.json` from a build directory works too.
+
+## GUI
+
+Every -inator deserves a control panel with big buttons. `proxynator-gui` (*Proxynator* in the Linux menu) is that
+panel for the running service. It needs no admin rights: like the CLI, it only talks to `proxynatord`, which does the
+dirty work.
+
+![Editing rules in the GUI](docs/images/gui-rules.png)
+
+- **Overview:** service, capture mode and state, relay, DNS mode, and the active rules with their resolved routes.
+- **Connections:** live, newest first, with process, destination, rule, route and bytes. Closed connections stay
+  listed so short-lived ones can still be inspected. Filter by anything.
+- **Rules, Proxies, Settings:** edit a working copy of the configuration. Problems are shown as you type
+  ("Rule 'web' (action.target): Unknown proxy or chain 'brup'."), and nothing reaches the service until you press
+  **Apply** (until the next restart) or **Apply and save** (also saved as the service configuration). The service
+  validates again and swaps the configuration atomically, exactly like `proxynator config load`. Settings without a
+  form are kept. **Test connection** checks that a proxy accepts connections; **Add Burp** adds `127.0.0.1:8080` in
+  one click.
+- **JSON:** the working copy in the configuration file format, for pasting, opening and saving files.
+- **Launch** (`injection` / `preload` modes): start a program with the hook, open a **hooked terminal** (PowerShell
+  on Windows, your shell in the desktop's terminal on Linux, so everything you start from it is captured), or
+  attach to a running process (Windows). In `windivert` / `ebpf` mode it tells you to just start things normally.
+- **Diagnostics:** the `proxynator doctor` checks.
+
+![Live connections, dark theme](docs/images/gui-connections.png)
+
+It follows the system's light or dark theme. `--endpoint` (or `PROXYNATOR_ENDPOINT`) picks a non-default service.
+When the service runs as a Windows service (LocalSystem), start the GUI elevated, as with the CLI; on Linux, members
+of the `proxynator` group can use it without sudo.
 
 ## CLI
 
@@ -369,6 +400,8 @@ dotnet test Proxynator.sln --filter "Category!=Integration"
 ```
 
 Building on Windows downloads the pinned WinDivert release (SHA-256 verified) and puts it next to `proxynatord`.
+The GUI is built with Avalonia, whose build sends anonymous usage statistics unless `AVALONIA_TELEMETRY_OPTOUT=1` is
+set (CI sets it).
 
 The native capture parts are built separately, first; the .NET build then copies them next to the executables.
 Without them everything still builds, and only the modes that need them stop working (`proxynator doctor` says so):
@@ -383,16 +416,19 @@ Self-contained builds and the Debian package:
 ```
 dotnet publish src/Proxynator.Service -c Release -r win-x64 --self-contained -o out
 dotnet publish src/Proxynator.Cli -c Release -r win-x64 --self-contained -o out
+dotnet publish src/Proxynator.Gui -c Release -r win-x64 --self-contained -o out
 
 dotnet publish src/Proxynator.Service -c Release -r linux-x64 --self-contained -o out
 dotnet publish src/Proxynator.Cli -c Release -r linux-x64 --self-contained -o out
+dotnet publish src/Proxynator.Gui -c Release -r linux-x64 --self-contained -o out
 ./build/package-deb.sh out 0.1.0
 ```
 
 GitHub Actions builds and tests every push on Windows and Linux, including end-to-end tests that push real traffic
 through all four capture modes (curl, nslookup, PowerShell, Python, pip in a venv, shell scripts, attaching to running
 programs; Windows needs an elevated prompt and Linux needs root: `dotnet test tests/Proxynator.IntegrationTests`).
-It publishes the `proxynator-win-x64` build and the `proxynator-linux-x64-deb` package.
+It publishes the `proxynator-win-x64` build, the `proxynator-linux-x64-deb` package and screenshots of every GUI page
+(rendered headlessly by the GUI tests).
 
 ## Roadmap
 
@@ -401,7 +437,8 @@ It publishes the `proxynator-win-x64` build and the `proxynator-linux-x64-deb` p
 3. ✅ Remote (fake-IP) DNS, UDP via SOCKS5, QUIC blocking, child-process rules that survive launcher exit.
 4. ✅ Windows: `injection` capture mode (`proxynator run` / `attach`, child processes, both bitnesses).
 5. ✅ Linux: `ebpf` and `preload` capture modes, systemd unit, `.deb` packages for Ubuntu and Kali.
-6. Cross-platform GUI.
+6. ✅ Desktop GUI for Windows and Linux (Avalonia): live connections, rule/proxy/settings editors, launching hooked
+   programs and terminals, diagnostics.
 7. Later: connection log export, pcap output, statistics, TLS-to-proxy hops, UDP relaying in the other modes, ARM64.
    And maybe a self-destruct button that's actually labelled.
 
@@ -415,4 +452,5 @@ platypuses wearing fedoras will be viewed with suspicion.
 Licensed under the [Apache License 2.0](LICENSE). If you redistribute Proxynator or a derivative, keep the
 [`NOTICE`](NOTICE) file, which credits this project. Third-party components keep their own licenses: WinDivert is
 LGPLv3/GPLv2 and loaded dynamically; Microsoft Detours is MIT; libbpf (LGPL-2.1/BSD-2-Clause) is the system's,
-loaded dynamically. The eBPF program (`native/linux/bpf`) is dual-licensed MIT/GPL-2.0, as the kernel requires.
+loaded dynamically; the GUI uses Avalonia, SkiaSharp, HarfBuzzSharp and the CommunityToolkit (MIT) and the Inter font
+(SIL OFL 1.1). The eBPF program (`native/linux/bpf`) is dual-licensed MIT/GPL-2.0, as the kernel requires.

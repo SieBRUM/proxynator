@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the Debian package (Ubuntu, Kali) from a self-contained linux-x64 publish directory that contains
-# proxynatord, proxynator, proxynator.bpf.o and libproxynator-preload.so.
+# proxynatord, proxynator, proxynator-gui, proxynator.bpf.o and libproxynator-preload.so.
 #   build/package-deb.sh <publish-dir> <version> [output-dir]
 set -euo pipefail
 
@@ -9,7 +9,7 @@ version="$2"
 output="${3:-.}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-for file in proxynatord proxynator proxynator.bpf.o libproxynator-preload.so; do
+for file in proxynatord proxynator proxynator-gui proxynator.bpf.o libproxynator-preload.so; do
   [[ -e "$publish/$file" ]] || { echo "missing $publish/$file" >&2; exit 1; }
 done
 
@@ -18,10 +18,14 @@ trap 'rm -rf "$staging"' EXIT
 package="$staging/proxynator_${version}_amd64"
 
 install -d "$package/opt/proxynator" "$package/usr/bin" "$package/usr/sbin" "$package/lib/systemd/system" \
-  "$package/etc/proxynator" "$package/usr/share/doc/proxynator" "$package/DEBIAN"
+  "$package/etc/proxynator" "$package/usr/share/doc/proxynator" "$package/usr/share/applications" \
+  "$package/usr/share/icons/hicolor/256x256/apps" "$package/DEBIAN"
 cp -a "$publish/." "$package/opt/proxynator/"
 ln -s /opt/proxynator/proxynator "$package/usr/bin/proxynator"
+ln -s /opt/proxynator/proxynator-gui "$package/usr/bin/proxynator-gui"
 ln -s /opt/proxynator/proxynatord "$package/usr/sbin/proxynatord"
+install -m 0644 "$root/packaging/linux/proxynator.desktop" "$package/usr/share/applications/proxynator.desktop"
+install -m 0644 "$root/src/Proxynator.Gui/Assets/proxynator.png" "$package/usr/share/icons/hicolor/256x256/apps/proxynator.png"
 install -m 0644 "$root/packaging/linux/proxynatord.service" "$package/lib/systemd/system/proxynatord.service"
 install -m 0640 "$root/packaging/linux/config.json" "$package/etc/proxynator/config.json"
 install -m 0644 "$root/LICENSE" "$root/NOTICE" "$root/README.md" "$package/usr/share/doc/proxynator/"
@@ -35,6 +39,7 @@ Section: net
 Priority: optional
 Architecture: amd64
 Depends: libc6, libbpf1 | libbpf0
+Recommends: libx11-6, libice6, libsm6, libfontconfig1
 Maintainer: The Proxynator Authors <https://github.com/SieBRUM/proxynator>
 Homepage: https://github.com/SieBRUM/proxynator
 Description: forces chosen applications' traffic through SOCKS/HTTP proxies
@@ -42,7 +47,8 @@ Description: forces chosen applications' traffic through SOCKS/HTTP proxies
  rule) and sends them through SOCKS4/4a/5 or HTTP CONNECT proxies and chains,
  for analysis in Burp Suite, mitmproxy or through a pivot. It works for programs
  that ignore proxy settings: the ebpf mode captures in the kernel, the preload
- mode hooks programs started with 'proxynator run'.
+ mode hooks programs started with 'proxynator run'. Includes a command line
+ client (proxynator) and a desktop GUI (proxynator-gui).
 CONTROL
 
 echo "/etc/proxynator/config.json" > "$package/DEBIAN/conffiles"
@@ -58,7 +64,8 @@ if [ "$1" = "configure" ]; then
     systemctl daemon-reload >/dev/null || true
   fi
   echo "proxynatord is installed but not started. Edit /etc/proxynator/config.json (samples in /usr/share/doc/proxynator/samples),"
-  echo "then: sudo systemctl enable --now proxynatord. Add yourself to the 'proxynator' group to use the CLI without sudo."
+  echo "then: sudo systemctl enable --now proxynatord. Add yourself to the 'proxynator' group to use the CLI and the GUI"
+  echo "(proxynator-gui, 'Proxynator' in the menu) without sudo."
 fi
 SCRIPT
 

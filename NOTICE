@@ -19,5 +19,14 @@ Third-party components (bundled or downloaded at build time):
   Licensed under LGPL-2.1 OR BSD-2-Clause. Not bundled: the system's library is
   loaded dynamically by the Linux ebpf capture mode.
 
+- Avalonia (https://avaloniaui.net), SkiaSharp and HarfBuzzSharp
+  (https://github.com/mono), .NET Community Toolkit (MVVM)
+  (https://github.com/CommunityToolkit/dotnet): MIT License. Bundled with the
+  GUI (proxynator-gui).
+
+- Inter font (https://rsms.me/inter), via Avalonia.Fonts.Inter
+  Copyright The Inter Project Authors. SIL Open Font License 1.1. Bundled with
+  the GUI.
+
 The eBPF program in native/linux/bpf is dual-licensed under the MIT License
 and GPL-2.0-only (the kernel requires a GPL-compatible license for it).

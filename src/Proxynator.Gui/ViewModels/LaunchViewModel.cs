@@ -138,7 +138,14 @@ internal sealed partial class LaunchViewModel : PageViewModel
                     continue;
                 }
 
-                entries.Add(new ProcessEntry(process.Id, process.ProcessName));
+                try
+                {
+                    entries.Add(new ProcessEntry(process.Id, process.ProcessName));
+                }
+                catch (InvalidOperationException)
+                {
+                    // Exited while listing.
+                }
             }
         }
 

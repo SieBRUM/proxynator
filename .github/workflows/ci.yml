@@ -15,6 +15,8 @@ concurrency:
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  # Avalonia's build reports anonymous usage statistics unless this is set.
+  AVALONIA_TELEMETRY_OPTOUT: 1
 
 jobs:
   build-and-test:
@@ -69,13 +71,14 @@ jobs:
           PROXYNATOR_REQUIRE_INTEGRATION: '1'
         run: dotnet test tests/Proxynator.IntegrationTests -c Release --no-build --logger "trx;LogFileName=integration.trx" --logger "console;verbosity=detailed" --results-directory TestResults
 
-      # A self-contained build packaged as a .deb for Ubuntu and Kali (proxynatord, proxynator, the eBPF object,
-      # the preload library, a systemd unit and a default configuration).
+      # A self-contained build packaged as a .deb for Ubuntu and Kali (proxynatord, proxynator, proxynator-gui, the
+      # eBPF object, the preload library, a systemd unit, a desktop entry and a default configuration).
       - name: Build Debian package
         if: runner.os == 'Linux'
         run: |
           dotnet publish src/Proxynator.Service -c Release -r linux-x64 --self-contained -o publish/linux-x64
           dotnet publish src/Proxynator.Cli -c Release -r linux-x64 --self-contained -o publish/linux-x64
+          dotnet publish src/Proxynator.Gui -c Release -r linux-x64 --self-contained -o publish/linux-x64
           ./build/package-deb.sh publish/linux-x64 0.1.0 publish
 
       - name: Upload Debian package
@@ -92,6 +95,15 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo -E env "PATH=$PATH" "DOTNET_ROOT=${DOTNET_ROOT:-}" PROXYNATOR_REQUIRE_INTEGRATION=1 dotnet test tests/Proxynator.IntegrationTests -c Release --no-build --logger "trx;LogFileName=integration.trx" --logger "console;verbosity=detailed" --results-directory TestResults
 
+      # Screenshots of every GUI page, rendered by the headless GUI tests.
+      - name: Upload GUI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-screenshots-${{ matrix.os }}
+          path: tests/Proxynator.Gui.Tests/bin/Release/net10.0/screenshots
+          if-no-files-found: ignore
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -100,13 +112,14 @@ jobs:
           path: TestResults
           if-no-files-found: ignore
 
-      # A self-contained build (no .NET install needed) with proxynatord, proxynator, the WinDivert driver and the
-      # hook DLLs.
+      # A self-contained build (no .NET install needed) with proxynatord, proxynator, proxynator-gui, the WinDivert
+      # driver and the hook DLLs.
       - name: Publish Windows build
         if: runner.os == 'Windows'
         run: |
           dotnet publish src/Proxynator.Service -c Release -r win-x64 --self-contained -o publish/proxynator-win-x64
           dotnet publish src/Proxynator.Cli -c Release -r win-x64 --self-contained -o publish/proxynator-win-x64
+          dotnet publish src/Proxynator.Gui -c Release -r win-x64 --self-contained -o publish/proxynator-win-x64
           New-Item -ItemType Directory -Force publish/proxynator-win-x64/samples | Out-Null
           Copy-Item samples/*.json publish/proxynator-win-x64/samples/
           Copy-Item LICENSE, NOTICE publish/proxynator-win-x64/

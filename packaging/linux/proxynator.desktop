@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Proxynator
+GenericName=Proxy redirector
+Comment=Force chosen applications' traffic through SOCKS and HTTP proxies
+Exec=proxynator-gui
+Icon=proxynator
+Terminal=false
+Categories=Network;
+Keywords=proxy;socks;burp;pivot;redirect;

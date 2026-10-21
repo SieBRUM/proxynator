@@ -24,8 +24,8 @@ Targets: **Windows first** (10/11, x64), **Linux second** (Ubuntu LTS and Kali r
 
 ```
 ┌──────────────┐  ┌──────────────┐
-│ proxynator   │  │ GUI (later,  │      unprivileged
-│ (CLI)        │  │ Avalonia)    │
+│ proxynator   │  │ proxynator-  │      unprivileged
+│ (CLI)        │  │ gui (GUI)    │
 └──────┬───────┘  └──────┬───────┘
        │  gRPC over named pipe (Windows) / Unix domain socket (Linux)
 ┌──────▼─────────────────▼────────────────────────────────────┐
@@ -86,8 +86,8 @@ The user chooses the capture mode in config (`settings.capture.mode`).
 **Windows – `injection` (user-mode, opt-in)** — see ADR 0004
 - Native hook DLL in `native/windows/hook` (C++17, Microsoft Detours at a pinned commit via CMake FetchContent,
   static CRT), built for **x64 and x86** (`proxynator-hook64.dll` / `proxynator-hook32.dll`) by
-  `build/build-native.ps1` into `artifacts/native/win-x64|win-x86`; `build/NativeHook.targets` (imported by
-  `proxynatord` and `proxynator`) copies them when present. Ordinal 1 must stay `DetourFinishHelperProcess`.
+  `build/build-native.ps1` into `artifacts/native/win-x64|win-x86`; `build/NativeArtifacts.targets` (imported by
+  `proxynatord`, `proxynator` and `proxynator-gui`) copies them when present. Ordinal 1 must stay `DetourFinishHelperProcess`.
 - Hooks are installed only in processes carrying the Detours payload (`payload.h`: pipe path). Elsewhere the DLL only
   serves exports: `ProxynatorCreateProcess` / `ProxynatorAttach` (called by `HookInjector` in the CLI) and
   `ProxynatorAttachRundllW` (32-bit attach via SysWOW64 rundll32).
@@ -242,6 +242,28 @@ Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost
 - Exit codes: `proxynatord` 1 general, 2 insufficient privileges, 3 invalid configuration; `proxynator` 0 success,
   1 failure, 2 service unreachable.
 
+### GUI (`proxynator-gui`) — see ADR 0006
+
+- Avalonia 12 (Fluent, follows the system theme), MVVM with CommunityToolkit.Mvvm (`[ObservableProperty]` on
+  `partial` properties, `[RelayCommand]`). Compiled bindings everywhere (`x:DataType`, also on `DataGrid` columns);
+  `ViewLocator` maps page view models to views without reflection. Everything is `internal` (exe).
+- An unprivileged client of the same gRPC API as the CLI (`ServiceConnection`: one channel, 10 s deadline per call);
+  no GUI-specific RPCs. `--endpoint` / `PROXYNATOR_ENDPOINT` as for the CLI.
+- `MainWindowViewModel.TickAsync` runs every 2 s: status (`ServiceState`), then, when the service answers, outside
+  config changes (only while nothing is edited) and the visible page's `RefreshAsync`.
+- `ConfigWorkspace`: the working copy behind the Rules, Proxies, Settings and JSON pages. Items (`RuleItem`,
+  `ProxyItem`, `ChainItem`, `SettingsItem`) hold text as typed; `Build` turns them into a `ProxynatorConfig` with
+  `with` on the loaded config (settings without a form survive), `Revalidate` runs `ConfigValidator` on every change
+  and words the problems (`Describe`: `$.rules[1].action.target` → `Rule 'x' (action.target): ...`). Values the
+  editor cannot convert are reported once, by the editor. `ApplyAsync` sends it with `ApplyConfig`.
+- `ConnectionsViewModel`: `WatchConnections` (subscribe, then list; duplicates tolerated), counters refreshed with
+  `ListConnections`, reconnects after a service restart, keeps up to 1000 closed rows.
+- Launching lives in `Proxynator.Client` (`ProgramLauncher`), shared with `proxynator run|attach`: Windows injection
+  (`HookInjector`, batch files through a hooked `cmd.exe`, PowerShell/pwsh as the hooked terminal), Linux preload
+  (`PreloadLauncher`; the terminal runs `env LD_PRELOAD=... PROXYNATOR_HOOK_ENDPOINT=... $SHELL`, `LinuxTerminals`
+  picks `x-terminal-emulator` first).
+- File pickers are behind `IFileDialogs` so view models are testable.
+
 ## Repository layout
 
 ```
@@ -269,31 +291,37 @@ src/
   Proxynator.Ipc/                  .proto contracts, generated client/server, ControlClientFactory, IpcEndpoint
   Proxynator.Service/              proxynatord: ServiceHost (Kestrel on pipe/socket, Windows service, systemd),
                                    ProxynatorEngine, ControlService (gRPC), platform selection
+  Proxynator.Client/               shared by CLI and GUI: ProgramLauncher (run/attach/hooked terminal), LinuxTerminals,
+                                   ArgumentSplitter, DisplayFormat, ServiceHints
   Proxynator.Cli/                  proxynator CLI (System.CommandLine; Commands.cs is testable with captured output;
                                    InjectionCommands.cs: run, attach)
-  Proxynator.Gui/                  (later) Avalonia GUI (thin IPC client)
+  Proxynator.Gui/                  proxynator-gui (Avalonia): Services/ (ServiceConnection, file dialogs),
+                                   ViewModels/ (one per page + ConfigWorkspace and editable items), Views/, Assets/
 build/
   WinDivert.targets                pinned WinDivert download + verification, imported by executables
   NativeArtifacts.targets          copies native parts from artifacts/native/<rid>, imported by executables
   build-native.ps1                 builds the hook DLLs (CMake + MSVC, x64 and x86)
   build-native.sh                  builds proxynator.bpf.o and libproxynator-preload.so (clang, libbpf-dev, gcc)
-  package-deb.sh                   .deb from a linux-x64 publish (systemd unit, /etc config, proxynator group)
+  package-deb.sh                   .deb from a linux-x64 publish (systemd unit, /etc config, proxynator group,
+                                   desktop entry + icon)
 native/
   windows/hook/                    C++ Detours hook DLL (x64 + x86)
   linux/preload/                   C LD_PRELOAD library
   linux/bpf/                       eBPF programs (one object)
-packaging/linux/                   systemd unit, default /etc/proxynator/config.json
+packaging/linux/                   systemd unit, default /etc/proxynator/config.json, proxynator.desktop
 tests/
   Proxynator.Core.Tests/           Pure unit tests, run on both OSes (Support/ has fake proxies, echo server)
   Proxynator.Platform.Windows.Tests/  NAT, packet parsing, interop struct layouts; run on both OSes
   Proxynator.Platform.Linux.Tests/ /proc, mountinfo, capability parsing, process identity, eBPF classification; both OSes
-  Proxynator.Service.Tests/        In-process proxynatord + CLI over a real pipe/socket, fake platform module
+  Proxynator.Service.Tests/        In-process proxynatord + CLI over a real pipe/socket, fake platform module; Client helpers
+  Proxynator.Gui.Tests/            GUI view models against the in-process service; the real window on Avalonia's headless
+                                   platform ([AvaloniaFact], Skia) incl. screenshots of every page (PROXYNATOR_SCREENSHOTS)
   Proxynator.IntegrationTests/     Real capture in all four modes (curl, python, ...); elevated Windows / root on Linux;
                                    tagged [Trait("Category","Integration")], skipped elsewhere unless
                                    PROXYNATOR_REQUIRE_INTEGRATION=1 (CI), which turns a skip into a failure
 schema/                            config JSON schema (keep in sync with the config model)
 samples/                           example configs (every samples/*.json is loaded by a test, so they must stay valid)
-docs/                              design notes, ADRs (docs/adr/NNNN-title.md)
+docs/                              design notes, ADRs (docs/adr/NNNN-title.md), images/ (README screenshots)
 .github/workflows/                 CI
 ```
 
@@ -337,7 +365,11 @@ Run locally (elevated on Windows, root on Linux; `--no-capture` runs without pri
 ```
 dotnet run --project src/Proxynator.Service -- --config ./samples/config.json --verbose
 dotnet run --project src/Proxynator.Cli -- status
+dotnet run --project src/Proxynator.Gui                # unprivileged; --endpoint <pipe|socket> for a test service
 ```
+
+Set `AVALONIA_TELEMETRY_OPTOUT=1` when building: Avalonia's build otherwise sends anonymous usage statistics (CI sets
+it). On Linux without a display, `xvfb-run -a dotnet run --project src/Proxynator.Gui` starts the real app.
 
 On Linux, `-p:IncludeWinDivert=true` forces the WinDivert download (e.g. to check `build/WinDivert.targets`). A
 Windows publish (`dotnet publish src/Proxynator.Service -c Release -r win-x64 --self-contained`) can be produced from
@@ -345,7 +377,7 @@ Linux too.
 
 CI (`.github/workflows/ci.yml`) builds and unit-tests in Release on `windows-latest` and `ubuntu-latest`. Windows:
 builds the hook DLLs (x64 + x86) first, runs the WinDivert and injection integration tests (elevated) and uploads a
-self-contained `proxynator-win-x64` build. Linux: builds the eBPF object and preload library first, packages and
+self-contained `proxynator-win-x64` build (service, CLI, GUI). Both upload the GUI screenshots (`gui-screenshots-*`). Linux: builds the eBPF object and preload library first, packages and
 uploads `proxynator-linux-x64-deb`, then runs the eBPF and preload integration tests with sudo (last, so no
 root-owned files affect other steps). Tests for the other OS skip; on the right OS a skip is a failure in CI.
 
@@ -381,6 +413,12 @@ Windows (WinDivert, Win32) is only exercised by CI's Windows job; check it after
   destination; don't assert on it.
 - Types in `Proxynator.Platform.Linux` are `[SupportedOSPlatform("linux")]` per type, not per assembly; keep pure
   logic (parsers, `ProcessClassifier`, `Capabilities`) unattributed so its tests also build and run on Windows.
+- Avalonia: `TextBox.Watermark` is obsolete (use `PlaceholderText`); a binding on an element whose `DataContext` is
+  itself bound (`DataContext="{Binding SelectedRule}"`) resolves against the new context, so put `IsVisible` on a
+  parent; `IsVisible="{Binding !!Items.Count}"` turns a count into a bool. Button `Classes="accent"` takes the Fluent
+  palette's accent (set in `App.axaml`).
+- GUI tests run on Avalonia's dispatcher (`[AvaloniaFact]`); awaiting gRPC calls there is fine. Wait for view-model
+  state with `Wait.UntilAsync`, never with blocking waits.
 - The BPF `config` struct, `origin` and `endpoint_key` layouts are mirrored in `BpfCaptureBackend`; ports are network
   byte order, `sockops` local ports host order.
 
@@ -393,5 +431,6 @@ Windows (WinDivert, Win32) is only exercised by CI's Windows job; check it after
 - [x] Phase 4 — Windows `injection` mode (Detours hook DLL x64/x86, `run`, `attach`, child propagation, per-process remote DNS).
 - [x] Phase 5 — Linux: `ebpf` capture, `preload` mode, systemd unit, `.deb` packaging for Ubuntu/Kali. (`nftables`
   fallback not implemented: every supported distribution has BPF and BTF.)
-- [ ] Phase 6 — Avalonia GUI.
+- [x] Phase 6 — Avalonia GUI (`proxynator-gui`): overview, live connections, rule/proxy/chain/settings editors on a
+  validated working copy, JSON, launching hooked programs and terminals, attach (Windows), diagnostics.
 - [ ] Later — connection log export, pcap output, statistics, `https` (TLS-to-proxy) hops, ARM64 (Linux first; WinDivert has no ARM64 build).
