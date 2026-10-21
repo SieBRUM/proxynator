@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Runtime.Versioning;
+using Proxynator.Client;
 using Proxynator.Core.Tests.Support;
 using Proxynator.Ipc;
 using Proxynator.Platform.Linux.Preload;
@@ -227,6 +228,48 @@ public sealed class LinuxCaptureTests : IAsyncLifetime
         var (exitCode, _, error) = await RunPreloadedAsync(service, "sh", ["-c", $"curl {string.Join(' ', CurlArguments)} -H 'Host: {Name}' {target.Url()}"]);
 
         Assert.True(exitCode == 0, $"curl failed ({exitCode}): {error}");
+        Assert.Contains(proxy.Requests, r => r.Host == Name);
+    }
+
+    [Fact]
+    public async Task Preload_programs_started_like_the_gui_and_cli_do_follow_the_rules()
+    {
+        Requirements.RootLinux();
+        await using var service = await StartAsync("preload", "{}");
+        var fetch = WriteScript("fetch.sh", $"#!/bin/sh\ncurl {string.Join(' ', CurlArguments)} -H 'Host: {Name}' {target.Url()}\n");
+
+        using var program = new ProgramLauncher(service.Endpoint).Start(fetch, [], directory);
+        var exitCode = await program.WaitForExitAsync(TestTimeout.Token(60));
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(proxy.Requests, r => r.Host == Name);
+    }
+
+    [Fact]
+    public async Task A_hooked_terminal_runs_the_shell_with_the_preload_library()
+    {
+        Requirements.RootLinux();
+        await using var service = await StartAsync("preload", "{}");
+
+        // A stand-in for the desktop's terminal emulator (runs the command after -e) and a "shell" that fetches.
+        Directory.CreateDirectory(Path.Combine(directory, "bin"));
+        WriteScript("bin/x-terminal-emulator", "#!/bin/sh\n[ \"$1\" = -e ] && shift\nexec \"$@\"\n");
+        var shell = WriteScript("shell.sh", $"#!/bin/sh\ncurl {string.Join(' ', CurlArguments)} -H 'Host: {Name}' {target.Url()}\n");
+        var previousPath = Environment.GetEnvironmentVariable("PATH");
+        var previousShell = Environment.GetEnvironmentVariable("SHELL");
+        Environment.SetEnvironmentVariable("PATH", $"{Path.Combine(directory, "bin")}:{previousPath}");
+        Environment.SetEnvironmentVariable("SHELL", shell);
+        try
+        {
+            using var terminal = new ProgramLauncher(service.Endpoint).OpenTerminal();
+            Assert.Equal(0, await terminal.WaitForExitAsync(TestTimeout.Token(60)));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", previousPath);
+            Environment.SetEnvironmentVariable("SHELL", previousShell);
+        }
+
         Assert.Contains(proxy.Requests, r => r.Host == Name);
     }
 

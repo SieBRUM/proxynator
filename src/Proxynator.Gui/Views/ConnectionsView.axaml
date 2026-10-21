@@ -1,0 +1,48 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Proxynator.Gui.ViewModels"
+             x:Class="Proxynator.Gui.Views.ConnectionsView"
+             x:DataType="vm:ConnectionsViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="10" Margin="0,0,0,10">
+      <TextBlock Classes="h1" Text="Connections" />
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="10">
+          <CheckBox Content="Show closed" IsChecked="{Binding ShowClosed}" />
+          <Button Content="Clear closed" Command="{Binding ClearClosedCommand}" />
+        </StackPanel>
+        <TextBox PlaceholderText="Filter: process, destination, rule, proxy…" Text="{Binding Filter}" Margin="0,0,12,0" />
+      </DockPanel>
+      <TextBlock Classes="muted" Text="{Binding Summary}" />
+    </StackPanel>
+
+    <Border DockPanel.Dock="Bottom" Classes="card" Margin="0,10,0,0" Padding="12,8"
+            IsVisible="{Binding SelectedRow, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <SelectableTextBlock Classes="mono" FontSize="12" TextWrapping="Wrap">
+        <Run Text="{Binding SelectedRow.ProcessPath, FallbackValue=''}" />
+        <Run Text="(pid" /><Run Text="{Binding SelectedRow.ProcessId, FallbackValue=''}" /><Run Text=")" />
+        <Run Text="→" />
+        <Run Text="{Binding SelectedRow.Destination, FallbackValue=''}" />
+        <Run Text="via" />
+        <Run Text="{Binding SelectedRow.Via, FallbackValue=''}" />
+      </SelectableTextBlock>
+    </Border>
+
+    <DataGrid ItemsSource="{Binding View}" SelectedItem="{Binding SelectedRow}" IsReadOnly="True"
+              GridLinesVisibility="Horizontal" HeadersVisibility="Column" CanUserResizeColumns="True">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Started" Binding="{Binding Started}" x:DataType="vm:ConnectionRow" />
+        <DataGridTextColumn Header="State" Binding="{Binding State}" x:DataType="vm:ConnectionRow" />
+        <DataGridTextColumn Header="Proto" Binding="{Binding Protocol}" x:DataType="vm:ConnectionRow" />
+        <DataGridTextColumn Header="Process" Binding="{Binding Process}" x:DataType="vm:ConnectionRow" />
+        <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" x:DataType="vm:ConnectionRow" />
+        <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="*" x:DataType="vm:ConnectionRow" />
+        <DataGridTextColumn Header="Rule" Binding="{Binding Rule}" x:DataType="vm:ConnectionRow" />
+        <DataGridTextColumn Header="Via" Binding="{Binding Via}" x:DataType="vm:ConnectionRow" />
+        <DataGridTextColumn Header="Sent" Binding="{Binding Sent}" SortMemberPath="BytesSent" x:DataType="vm:ConnectionRow" />
+        <DataGridTextColumn Header="Received" Binding="{Binding Received}" SortMemberPath="BytesReceived" x:DataType="vm:ConnectionRow" />
+        <DataGridTextColumn Header="Age" Binding="{Binding Duration}" x:DataType="vm:ConnectionRow" />
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>

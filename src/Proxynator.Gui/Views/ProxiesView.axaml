@@ -1,0 +1,105 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Proxynator.Gui.ViewModels"
+             xmlns:conv="using:Proxynator.Gui.Converters"
+             xmlns:views="using:Proxynator.Gui.Views"
+             x:Class="Proxynator.Gui.Views.ProxiesView"
+             x:DataType="vm:ProxiesViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,10">
+      <TextBlock Classes="h1" Text="Proxies and chains" />
+      <TextBlock Classes="muted" Text="Rules send traffic through a proxy or a chain. A chain tunnels through its proxies in order: the first is connected to directly, each next one through the previous." />
+    </StackPanel>
+
+    <ScrollViewer>
+      <StackPanel Spacing="16">
+        <Grid ColumnDefinitions="2*,16,3*">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Classes="toolbar" Margin="0,0,0,8">
+              <Button Content="Add proxy" Command="{Binding AddProxyCommand}" />
+              <Button Content="Add Burp (127.0.0.1:8080)" Command="{Binding AddBurpCommand}" />
+              <Button Content="Delete" Command="{Binding DeleteProxyCommand}" />
+            </StackPanel>
+            <ListBox ItemsSource="{Binding Workspace.Proxies}" SelectedItem="{Binding SelectedProxy}" MinHeight="160" MaxHeight="320">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:ProxyItem">
+                  <StackPanel>
+                    <TextBlock Text="{Binding Id}" FontWeight="SemiBold" />
+                    <TextBlock Classes="muted mono" FontSize="12" Text="{Binding Summary}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+
+          <Border Grid.Column="2" Classes="card" VerticalAlignment="Top">
+            <Panel>
+              <TextBlock Classes="muted" Text="Select a proxy to edit it, or add one." IsVisible="{Binding !HasProxySelection}" />
+              <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10"
+                    DataContext="{Binding SelectedProxy}" x:DataType="vm:ProxyItem"
+                    IsVisible="{Binding $self.DataContext, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <TextBlock Classes="label" Text="ID" />
+                <TextBox Grid.Column="1" Text="{Binding Id}" />
+                <TextBlock Grid.Row="1" Classes="label" Text="Type" />
+                <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="160" ItemsSource="{x:Static vm:ProxiesViewModel.ProxyTypes}" SelectedItem="{Binding Type}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Converter={x:Static conv:Display.ConfigName}}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Grid.Row="2" Classes="label" Text="Host" />
+                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Host}" />
+                <TextBlock Grid.Row="3" Classes="label" Text="Port" />
+                <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Port}" Width="120" HorizontalAlignment="Left" />
+                <TextBlock Grid.Row="4" Classes="label" Text="Username" />
+                <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Username}" PlaceholderText="optional (SOCKS4: user ID)" />
+                <TextBlock Grid.Row="5" Classes="label" Text="Password" IsVisible="{Binding SupportsPassword}" />
+                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Password}" PasswordChar="•" IsVisible="{Binding SupportsPassword}" />
+                <StackPanel Grid.Row="6" Grid.Column="1" Spacing="4">
+                  <Button Content="Test connection" Command="{Binding $parent[UserControl].((vm:ProxiesViewModel)DataContext).TestProxyCommand}" />
+                  <TextBlock Classes="muted" Text="{Binding TestResult}" />
+                </StackPanel>
+              </Grid>
+            </Panel>
+          </Border>
+        </Grid>
+
+        <Grid ColumnDefinitions="2*,16,3*">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Classes="toolbar" Margin="0,0,0,8">
+              <Button Content="Add chain" Command="{Binding AddChainCommand}" />
+              <Button Content="Delete" Command="{Binding DeleteChainCommand}" />
+            </StackPanel>
+            <ListBox ItemsSource="{Binding Workspace.Chains}" SelectedItem="{Binding SelectedChain}" MinHeight="100" MaxHeight="240">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:ChainItem">
+                  <StackPanel>
+                    <TextBlock Text="{Binding Id}" FontWeight="SemiBold" />
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding Summary}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+
+          <Border Grid.Column="2" Classes="card" VerticalAlignment="Top">
+            <Panel>
+              <TextBlock Classes="muted" Text="Select a chain to edit it, or add one." IsVisible="{Binding !HasChainSelection}" />
+              <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" RowSpacing="10"
+                    DataContext="{Binding SelectedChain}" x:DataType="vm:ChainItem"
+                    IsVisible="{Binding $self.DataContext, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <TextBlock Classes="label" Text="ID" />
+                <TextBox Grid.Column="1" Text="{Binding Id}" />
+                <TextBlock Grid.Row="1" Classes="label" Text="Hops" />
+                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Hops}" PlaceholderText="proxy IDs in order, e.g. pivot, burp" />
+              </Grid>
+            </Panel>
+          </Border>
+        </Grid>
+
+        <views:ProblemsView DataContext="{Binding Workspace}" />
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</UserControl>

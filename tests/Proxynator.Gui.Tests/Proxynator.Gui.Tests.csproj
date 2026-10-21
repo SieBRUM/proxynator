@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CA1707;CA2007;CA1515;CA1001;CA1848;CA1849;xUnit1051</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Headless.XUnit" />
+    <PackageReference Include="Avalonia.Skia" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Proxynator.Gui\Proxynator.Gui.csproj" />
+    <ProjectReference Include="..\..\src\Proxynator.Service\Proxynator.Service.csproj" />
+  </ItemGroup>
+
+  <!-- The in-process proxynatord of the service tests. -->
+  <ItemGroup>
+    <Compile Include="..\Proxynator.Service.Tests\TestService.cs" Link="Support\TestService.cs" />
+    <Compile Include="..\Proxynator.Service.Tests\TestPlatformModule.cs" Link="Support\TestPlatformModule.cs" />
+    <Compile Include="..\Proxynator.Core.Tests\Support\TestTimeout.cs" Link="Support\TestTimeout.cs" />
+    <Compile Include="..\Proxynator.Core.Tests\Support\EchoServer.cs" Link="Support\EchoServer.cs" />
+    <Compile Include="..\Proxynator.Core.Tests\Support\SocketExtensions.cs" Link="Support\SocketExtensions.cs" />
+    <None Include="..\..\samples\config.json" Link="samples\config.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

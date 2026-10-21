@@ -1,5 +1,6 @@
 using System.Globalization;
 using Grpc.Core;
+using Proxynator.Client;
 using Proxynator.Core.Configuration;
 using Proxynator.Ipc;
 using Proxynator.Ipc.V1;
@@ -13,7 +14,7 @@ internal sealed class Commands(string endpoint, TextWriter output, TextWriter er
     {
         var status = await client.GetStatusAsync(new GetStatusRequest(), cancellationToken: cancellationToken);
         var uptime = DateTimeOffset.UtcNow - status.StartedAt.ToDateTimeOffset();
-        output.WriteLine($"proxynatord {status.Version} on {status.Platform} (pid {status.ProcessId}), up {Format.Duration(uptime)}");
+        output.WriteLine($"proxynatord {status.Version} on {status.Platform} (pid {status.ProcessId}), up {DisplayFormat.Duration(uptime)}");
         var activity = status.Capture.Activity.Length > 0 ? $" ({status.Capture.Activity})" : string.Empty;
         output.WriteLine($"Capture:      {status.Capture.Mode} - {DescribeState(status.Capture.State)}{activity}");
         if (status.Capture.State is CaptureState.Failed or CaptureState.Disabled)
@@ -131,9 +132,9 @@ internal sealed class Commands(string endpoint, TextWriter output, TextWriter er
                 c.Destination,
                 c.Rule,
                 c.Action == "proxy" ? c.Route : c.Action,
-                Format.Bytes(c.BytesSent),
-                Format.Bytes(c.BytesReceived),
-                Format.Duration(now - c.StartedAt.ToDateTimeOffset()),
+                DisplayFormat.Bytes(c.BytesSent),
+                DisplayFormat.Bytes(c.BytesReceived),
+                DisplayFormat.Duration(now - c.StartedAt.ToDateTimeOffset()),
             ]);
             Format.Table(output, ["ID", "PROTO", "PROCESS", "DESTINATION", "RULE", "VIA", "SENT", "RECEIVED", "AGE"], rows);
         }
@@ -152,7 +153,7 @@ internal sealed class Commands(string endpoint, TextWriter output, TextWriter er
                 var c = connectionEvent.Connection;
                 output.WriteLine(connectionEvent.Kind == ConnectionEvent.Types.Kind.Opened
                     ? $"+ #{c.Id} {c.Protocol} {DescribeProcess(c)} -> {c.Destination}  [{c.Rule}] {(c.Action == "proxy" ? "via " + c.Route : c.Action)}"
-                    : $"- #{c.Id} {c.Destination} closed: {Format.Bytes(c.BytesSent)} sent, {Format.Bytes(c.BytesReceived)} received");
+                    : $"- #{c.Id} {c.Destination} closed: {DisplayFormat.Bytes(c.BytesSent)} sent, {DisplayFormat.Bytes(c.BytesReceived)} received");
             }
         }
         catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled || cancellationToken.IsCancellationRequested)
@@ -199,10 +200,11 @@ internal sealed class Commands(string endpoint, TextWriter output, TextWriter er
         }
         catch (RpcException ex) when (ex.StatusCode == StatusCode.Unavailable)
         {
-            error.WriteLine($"Cannot reach proxynatord at {IpcEndpoint.Describe(endpoint)}. Is it running?");
-            error.WriteLine(OperatingSystem.IsWindows()
-                ? "Start it from an elevated prompt (e.g. 'proxynatord --config config.json'). When it runs as a Windows service, run this command elevated too."
-                : "Start it with 'sudo systemctl start proxynatord' (package install) or 'sudo proxynatord --config config.json'. As a service, the CLI needs root or membership of the 'proxynator' group.");
+            foreach (var line in ServiceHints.Unreachable(endpoint))
+            {
+                error.WriteLine(line);
+            }
+
             return ExitCodes.ServiceUnreachable;
         }
         catch (RpcException ex)

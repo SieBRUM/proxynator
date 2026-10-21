@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
+using Proxynator.Client;
 using Proxynator.Core.Tests.Support;
 using Proxynator.Platform.Windows.Injection;
 
@@ -79,6 +80,22 @@ public sealed class InjectionCaptureTests : IAsyncLifetime
         Assert.Equal(0, exitCode);
         var request = Assert.Single(proxy.Requests);
         Assert.Equal((Target, 80), (request.Host, request.Port));
+    }
+
+    [Fact]
+    public async Task A_batch_file_started_like_the_gui_and_cli_do_is_routed_through_the_proxy()
+    {
+        Requirements.ElevatedWindowsWithHooks();
+        await using var service = await StartAsync(ProxyAllConfig());
+        await File.WriteAllTextAsync(Path.Combine(directory, "fetch.cmd"), $"@\"{Path.Combine(System32, "curl.exe")}\" {string.Join(' ', CurlArguments($"http://{Target}/"))}\r\n");
+
+        // Found in the working directory through PATHEXT, run by a hooked cmd.exe, which hooks curl.
+        using var program = new ProgramLauncher(service.Endpoint).Start("fetch", [], directory);
+        var exitCode = await program.WaitForExitAsync(TestTimeout.Token(60));
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("fetch.cmd", program.Name);
+        Assert.Contains(proxy.Requests, r => (r.Host, r.Port) == (Target, 80));
     }
 
     [Fact]

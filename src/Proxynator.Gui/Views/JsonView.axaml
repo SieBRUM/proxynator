@@ -1,0 +1,32 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Proxynator.Gui.ViewModels"
+             x:Class="Proxynator.Gui.Views.JsonView"
+             x:DataType="vm:JsonViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,10">
+      <TextBlock Classes="h1" Text="Configuration JSON" />
+      <TextBlock Classes="muted" Text="The working copy in the configuration file format. Edit or open a file, then use it as the working copy and apply it." />
+      <StackPanel Orientation="Horizontal" Classes="toolbar">
+        <Button Content="Validate" Command="{Binding ValidateCommand}" />
+        <Button Content="Use as working copy" Classes="accent" Command="{Binding UseTextCommand}" />
+        <Button Content="Reset" Command="{Binding ResetCommand}" ToolTip.Tip="Show the working copy again" />
+        <Button Content="Open file…" Command="{Binding OpenCommand}" />
+        <Button Content="Save as…" Command="{Binding SaveCommand}" />
+        <TextBlock Classes="warning" VerticalAlignment="Center" Margin="8,0" Text="edited, not yet used" IsVisible="{Binding IsModified}" />
+      </StackPanel>
+    </StackPanel>
+
+    <ItemsControl DockPanel.Dock="Bottom" ItemsSource="{Binding Messages}" Margin="0,8,0,0">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="x:String">
+          <SelectableTextBlock Text="{Binding}" TextWrapping="Wrap" />
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <TextBox Classes="mono" Text="{Binding Text}" AcceptsReturn="True" AcceptsTab="False" TextWrapping="NoWrap"
+             FontSize="13" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
+             VerticalContentAlignment="Top" />
+  </DockPanel>
+</UserControl>

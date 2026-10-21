@@ -1,0 +1,87 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Proxynator.Gui.ViewModels"
+             xmlns:conv="using:Proxynator.Gui.Converters"
+             xmlns:views="using:Proxynator.Gui.Views"
+             x:Class="Proxynator.Gui.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,10">
+      <TextBlock Classes="h1" Text="Settings" />
+      <TextBlock Classes="muted" Text="Global settings of proxynatord. Everything else in the configuration file is kept as it is; edit it on the JSON page." />
+    </StackPanel>
+
+    <ScrollViewer>
+      <StackPanel Spacing="16" DataContext="{Binding Workspace.Settings}" x:DataType="vm:SettingsItem">
+        <Border Classes="card">
+          <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto" RowSpacing="8">
+            <TextBlock Classes="h2" Grid.ColumnSpan="2" Text="Capture" />
+            <TextBlock Grid.Row="1" Classes="label" Text="Capture mode" />
+            <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+              <ComboBox MinWidth="180" ItemsSource="{x:Static vm:SettingsViewModel.CaptureModes}" SelectedItem="{Binding CaptureMode}">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Converter={x:Static conv:Display.ConfigName}}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <TextBlock Classes="muted" FontSize="12"
+                         Text="auto: windivert on Windows, ebpf on Linux (kernel-level, every process, matched by name). injection (Windows) and preload (Linux) only capture programs started or attached from the Launch page. Takes effect after restarting proxynatord." />
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <Border Classes="card">
+          <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
+            <TextBlock Classes="h2" Grid.ColumnSpan="2" Text="DNS" />
+            <TextBlock Grid.Row="1" Classes="label" Text="DNS mode" />
+            <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+              <ComboBox MinWidth="180" ItemsSource="{x:Static vm:SettingsViewModel.DnsModes}" SelectedItem="{Binding DnsMode}">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Converter={x:Static conv:Display.ConfigName}}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <TextBlock Classes="muted" FontSize="12"
+                         Text="sniff: resolve locally, give the proxy the hostname from TLS SNI / HTTP Host. local: the proxy gets the IP. remote: fake addresses locally, the proxy resolves (no local DNS leak; needed for names only the far side knows)." />
+            </StackPanel>
+            <TextBlock Grid.Row="2" Classes="label" Text="Remote domains" IsVisible="{Binding IsRemoteDns}" />
+            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding RemoteDomains}" IsVisible="{Binding IsRemoteDns}" PlaceholderText="* or e.g. *.corp.local, corp.local" />
+            <TextBlock Grid.Row="3" Classes="label" Text="Fake address range" IsVisible="{Binding IsRemoteDns}" />
+            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding FakeIpRange}" IsVisible="{Binding IsRemoteDns}" Width="200" HorizontalAlignment="Left" />
+            <TextBlock Grid.Row="4" Classes="label" Text="Remote DNS server" IsVisible="{Binding IsRemoteDns}" />
+            <StackPanel Grid.Row="4" Grid.Column="1" Spacing="4" IsVisible="{Binding IsRemoteDns}">
+              <CheckBox Content="Send other lookups (SRV, TXT, …) to a DNS server behind a proxy" IsChecked="{Binding UseRemoteServer}" />
+              <TextBlock Classes="muted" FontSize="12" Text="E.g. a domain controller, so Active Directory discovery (_ldap._tcp.dc._msdcs) works through a pivot. Sent as DNS over TCP." />
+            </StackPanel>
+            <TextBlock Grid.Row="5" Classes="label" Text="Server address / port" IsVisible="{Binding UseRemoteServer}" />
+            <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="8" IsVisible="{Binding UseRemoteServer}">
+              <TextBox Text="{Binding RemoteServerAddress}" Width="200" PlaceholderText="10.0.0.10" />
+              <TextBox Text="{Binding RemoteServerPort}" Width="80" />
+            </StackPanel>
+            <TextBlock Grid.Row="6" Classes="label" Text="Via" IsVisible="{Binding UseRemoteServer}" />
+            <AutoCompleteBox Grid.Row="6" Grid.Column="1" IsVisible="{Binding UseRemoteServer}" Text="{Binding RemoteServerVia}" Width="200" HorizontalAlignment="Left"
+                             ItemsSource="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).Workspace.TargetIds}"
+                             FilterMode="Contains" MinimumPrefixLength="0" PlaceholderText="proxy or chain ID" />
+          </Grid>
+        </Border>
+
+        <Border Classes="card">
+          <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8">
+            <TextBlock Classes="h2" Grid.ColumnSpan="2" Text="Traffic" />
+            <TextBlock Grid.Row="1" Classes="label" Text="QUIC" />
+            <CheckBox Grid.Row="1" Grid.Column="1" IsChecked="{Binding BlockQuic}"
+                      Content="Block UDP/443 for proxied programs, so browsers fall back to TCP the proxy can see" />
+            <TextBlock Grid.Row="2" Classes="label" Text="Hostname sniff timeout (ms)" />
+            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SniffTimeoutMs}" Width="120" HorizontalAlignment="Left" />
+            <TextBlock Grid.Row="3" Classes="label" Text="Proxy connect timeout (ms)" />
+            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding ConnectTimeoutMs}" Width="120" HorizontalAlignment="Left" />
+          </Grid>
+        </Border>
+
+        <views:ProblemsView DataContext="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).Workspace}" />
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</UserControl>

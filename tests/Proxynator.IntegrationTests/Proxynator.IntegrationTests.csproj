@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Proxynator.Service\Proxynator.Service.csproj" />
+    <ProjectReference Include="..\..\src\Proxynator.Client\Proxynator.Client.csproj" />
   </ItemGroup>
 
   <ItemGroup>

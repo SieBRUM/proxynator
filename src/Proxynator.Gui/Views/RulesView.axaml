@@ -1,0 +1,102 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Proxynator.Gui.ViewModels"
+             xmlns:conv="using:Proxynator.Gui.Converters"
+             xmlns:views="using:Proxynator.Gui.Views"
+             x:Class="Proxynator.Gui.Views.RulesView"
+             x:DataType="vm:RulesViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,10">
+      <TextBlock Classes="h1" Text="Rules" />
+      <TextBlock Classes="muted" Text="Evaluated top to bottom for every new connection; the first enabled rule that matches decides. Traffic no rule matches goes direct." />
+    </StackPanel>
+
+    <Grid ColumnDefinitions="2*,16,3*">
+      <!-- Rule list -->
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Classes="toolbar" Margin="0,0,0,8">
+          <Button Content="Add" Command="{Binding AddCommand}" />
+          <Button Content="Duplicate" Command="{Binding DuplicateCommand}" />
+          <Button Content="Delete" Command="{Binding DeleteCommand}" />
+          <Button Content="↑" Command="{Binding MoveUpCommand}" ToolTip.Tip="Move up (evaluated earlier)" />
+          <Button Content="↓" Command="{Binding MoveDownCommand}" ToolTip.Tip="Move down (evaluated later)" />
+        </StackPanel>
+        <ListBox x:Name="RuleList" ItemsSource="{Binding Workspace.Rules}" SelectedItem="{Binding SelectedRule}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:RuleItem">
+              <DockPanel>
+                <CheckBox DockPanel.Dock="Left" IsChecked="{Binding Enabled}" VerticalAlignment="Center" ToolTip.Tip="Enabled" />
+                <StackPanel>
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                  <TextBlock Classes="muted" FontSize="12" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                </StackPanel>
+              </DockPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+
+      <!-- Rule editor -->
+      <ScrollViewer Grid.Column="2">
+        <StackPanel Spacing="12">
+          <Border Classes="card" IsVisible="{Binding !HasSelection}">
+            <TextBlock Classes="muted" Text="Select a rule to edit it, or add one." />
+          </Border>
+          <Border Classes="card" IsVisible="{Binding HasSelection}">
+            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10"
+                  DataContext="{Binding SelectedRule}" x:DataType="vm:RuleItem">
+              <TextBlock Classes="label" Text="Name" />
+              <TextBox Grid.Column="1" Text="{Binding Name}" />
+
+              <TextBlock Grid.Row="1" Classes="h2" Grid.ColumnSpan="2" Text="Match (all filled-in criteria)" Margin="0,8,0,0" />
+              <TextBlock Grid.Row="2" Classes="label" Text="Processes" />
+              <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
+                <TextBox Text="{Binding Processes}" PlaceholderText="e.g. curl.exe, nxc, python*, C:\Tools\*" />
+                <CheckBox Content="Include child processes" IsChecked="{Binding IncludeChildren}" />
+              </StackPanel>
+              <TextBlock Grid.Row="3" Classes="label" Text="Hosts" />
+              <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Hosts}" PlaceholderText="e.g. *.corp.local, example.com" />
+              <TextBlock Grid.Row="4" Classes="label" Text="Addresses" />
+              <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Addresses}" PlaceholderText="e.g. 10.0.0.0/8, 192.168.1.10" />
+              <TextBlock Grid.Row="5" Classes="label" Text="Ports" />
+              <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Ports}" PlaceholderText="e.g. 80, 443, 8000-8100" />
+              <TextBlock Grid.Row="6" Classes="label" Text="Protocols" />
+              <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Spacing="16">
+                <CheckBox Content="TCP" IsChecked="{Binding Tcp}" />
+                <CheckBox Content="UDP" IsChecked="{Binding Udp}" />
+              </StackPanel>
+
+              <TextBlock Grid.Row="7" Classes="h2" Grid.ColumnSpan="2" Text="Action" Margin="0,8,0,0" />
+              <TextBlock Grid.Row="8" Classes="label" Text="Action" />
+              <ComboBox Grid.Row="8" Grid.Column="1" MinWidth="160" ItemsSource="{x:Static vm:RulesViewModel.Actions}" SelectedItem="{Binding Action}">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Converter={x:Static conv:Display.ConfigName}}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <TextBlock Grid.Row="9" Classes="label" Text="Via" IsVisible="{Binding IsProxy}" />
+              <AutoCompleteBox Grid.Row="9" Grid.Column="1" IsVisible="{Binding IsProxy}" Text="{Binding Target}"
+                               ItemsSource="{Binding $parent[UserControl].((vm:RulesViewModel)DataContext).Workspace.TargetIds}"
+                               FilterMode="Contains" MinimumPrefixLength="0" PlaceholderText="proxy or chain ID" />
+              <TextBlock Grid.Row="10" Classes="label" Text="UDP" IsVisible="{Binding IsProxy}" />
+              <StackPanel Grid.Row="10" Grid.Column="1" Spacing="2" IsVisible="{Binding IsProxy}">
+                <ComboBox MinWidth="160" ItemsSource="{x:Static vm:RulesViewModel.UdpFallbacks}" SelectedItem="{Binding UdpFallback}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Converter={x:Static conv:Display.ConfigName}}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Classes="muted" FontSize="12"
+                           Text="When the route cannot carry UDP (HTTP or SOCKS4 proxies, chains): block it (fail closed) or send it direct." />
+              </StackPanel>
+            </Grid>
+          </Border>
+
+          <views:ProblemsView DataContext="{Binding Workspace}" />
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+  </DockPanel>
+</UserControl>

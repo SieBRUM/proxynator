@@ -1,0 +1,82 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Proxynator.Gui.ViewModels"
+        xmlns:conv="using:Proxynator.Gui.Converters"
+        x:Class="Proxynator.Gui.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="{Binding Title}"
+        Icon="avares://proxynator-gui/Assets/proxynator.png"
+        Width="1200" Height="780" MinWidth="900" MinHeight="560"
+        WindowStartupLocation="CenterScreen">
+
+  <Grid ColumnDefinitions="210,*" RowDefinitions="*,Auto,Auto">
+
+    <!-- Navigation -->
+    <Border Grid.RowSpan="3" Background="{DynamicResource SidebarBrush}">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="16,18,16,18" Spacing="10">
+          <Image Source="avares://proxynator-gui/Assets/proxynator.png" Width="36" Height="36" />
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="Proxynator" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock Text="the traffic-redirect-inator" FontSize="11" Classes="muted" />
+          </StackPanel>
+        </StackPanel>
+        <TextBlock DockPanel.Dock="Bottom" Margin="16,8,16,14" FontSize="11" Classes="muted"
+                   Text="{Binding State.Endpoint}" ToolTip.Tip="Control endpoint (--endpoint)" />
+        <ListBox x:Name="Navigation" ItemsSource="{Binding Pages}" SelectedItem="{Binding SelectedPage}"
+                 Background="Transparent" Margin="8,0">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:PageViewModel">
+              <StackPanel Orientation="Horizontal" Spacing="12" Margin="4,2">
+                <PathIcon Data="{Binding Icon, Converter={x:Static conv:Display.Resource}}" Width="16" Height="16" />
+                <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+    <!-- Page -->
+    <DockPanel Grid.Column="1">
+      <Border DockPanel.Dock="Top" Classes="card" Margin="20,16,20,0" IsVisible="{Binding State.IsDisconnected}"
+              BorderBrush="{DynamicResource ErrorBrush}">
+        <StackPanel Spacing="4">
+          <TextBlock Classes="error" FontWeight="SemiBold" Text="{Binding State.Headline}" />
+          <TextBlock Classes="muted" Text="{Binding State.Hint}" />
+        </StackPanel>
+      </Border>
+      <ContentControl Content="{Binding SelectedPage}" Margin="20,16,20,12" />
+    </DockPanel>
+
+    <!-- Pending configuration changes -->
+    <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource PendingBrush}" Padding="20,10"
+            IsVisible="{Binding Workspace.IsDirty}">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+          <Button Content="Discard" Command="{Binding DiscardCommand}" />
+          <Button Content="Apply" Command="{Binding ApplyCommand}"
+                  ToolTip.Tip="Apply until proxynatord restarts" />
+          <Button Content="Apply and save" Classes="accent" Command="{Binding ApplyAndSaveCommand}"
+                  ToolTip.Tip="Apply and save as the service's configuration file" />
+        </StackPanel>
+        <StackPanel VerticalAlignment="Center">
+          <TextBlock FontWeight="SemiBold" Text="Unapplied configuration changes" />
+          <TextBlock Classes="muted">
+            <Run Text="{Binding Workspace.ProblemSummary}" />
+            <Run Text="· new connections use the configuration once it is applied; open ones are not affected." />
+          </TextBlock>
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <!-- Status line -->
+    <Border Grid.Row="2" Grid.Column="1" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,1,0,0" Padding="20,6">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Right" Classes="muted" FontSize="12" Text="{Binding Workspace.StatusMessage}"
+                   MaxWidth="560" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Workspace.StatusMessage}" />
+        <TextBlock FontSize="12" Text="{Binding State.Headline}" TextTrimming="CharacterEllipsis" />
+      </DockPanel>
+    </Border>
+  </Grid>
+</Window>

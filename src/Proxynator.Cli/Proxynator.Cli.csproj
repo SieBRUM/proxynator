@@ -11,10 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Proxynator.Core\Proxynator.Core.csproj" />
-    <ProjectReference Include="..\Proxynator.Ipc\Proxynator.Ipc.csproj" />
-    <ProjectReference Include="..\Proxynator.Platform.Linux\Proxynator.Platform.Linux.csproj" />
-    <ProjectReference Include="..\Proxynator.Platform.Windows\Proxynator.Platform.Windows.csproj" />
+    <ProjectReference Include="..\Proxynator.Client\Proxynator.Client.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Proxynator.Gui.ViewModels"
+             x:Class="Proxynator.Gui.Views.DiagnosticsView"
+             x:DataType="vm:DiagnosticsViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,10">
+      <TextBlock Classes="h1" Text="Diagnostics" />
+      <TextBlock Classes="muted" Text="Privileges, capture driver and native parts, relay, proxy reachability: what 'proxynator doctor' checks." />
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <Button Content="Run checks" Classes="accent" Command="{Binding RunCommand}" />
+        <ProgressBar IsIndeterminate="True" Width="120" IsVisible="{Binding IsRunning}" />
+        <TextBlock VerticalAlignment="Center" Text="{Binding Summary}" />
+      </StackPanel>
+    </StackPanel>
+
+    <ScrollViewer>
+      <ItemsControl ItemsSource="{Binding Results}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:DiagnosticItem">
+            <Border Classes="card" Margin="0,0,0,8" Padding="12">
+              <Grid ColumnDefinitions="56,220,*">
+                <TextBlock Text="{Binding Label}" FontWeight="Bold"
+                           Classes.ok="{Binding IsOk}" Classes.warning="{Binding IsWarning}" Classes.error="{Binding IsError}" />
+                <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,12,0" />
+                <SelectableTextBlock Grid.Column="2" Text="{Binding Detail}" TextWrapping="Wrap" />
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+  </DockPanel>
+</UserControl>

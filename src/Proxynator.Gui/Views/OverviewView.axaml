@@ -1,0 +1,50 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Proxynator.Gui.ViewModels"
+             xmlns:conv="using:Proxynator.Gui.Converters"
+             x:Class="Proxynator.Gui.Views.OverviewView"
+             x:DataType="vm:OverviewViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="12">
+      <TextBlock Classes="h1" Text="Overview" />
+
+      <Border Classes="card">
+        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
+          <TextBlock Classes="label" Text="Service" />
+          <TextBlock Grid.Column="1" Text="{Binding Service}" TextWrapping="Wrap" />
+          <TextBlock Grid.Row="1" Classes="label" Text="Capture" />
+          <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Capture}" TextWrapping="Wrap"
+                     Classes.error="{Binding State.CaptureFailed}" FontWeight="SemiBold" />
+          <TextBlock Grid.Row="2" Grid.Column="1" Classes="muted" Text="{Binding CaptureDetail}"
+                     IsVisible="{Binding CaptureDetail, Converter={x:Static conv:Display.NotEmpty}}" />
+          <TextBlock Grid.Row="3" Classes="label" Text="Relay" />
+          <TextBlock Grid.Row="3" Grid.Column="1" Classes="mono" Text="{Binding Relay}" TextWrapping="Wrap" />
+          <TextBlock Grid.Row="4" Classes="label" Text="DNS mode" />
+          <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Dns}" />
+          <TextBlock Grid.Row="5" Classes="label" Text="Configuration" />
+          <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Config}" TextWrapping="Wrap" />
+          <TextBlock Grid.Row="6" Classes="label" Text="Connections" />
+          <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Connections}" />
+          <TextBlock Grid.Row="7" Classes="label" Text="Privileged" />
+          <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Privileged}" />
+        </Grid>
+      </Border>
+
+      <StackPanel Spacing="2" Margin="0,8,0,0">
+        <TextBlock Classes="h2" Text="Active rules" />
+        <TextBlock Classes="muted" Text="{Binding RulesMessage}" />
+      </StackPanel>
+    </StackPanel>
+
+    <DataGrid ItemsSource="{Binding Rules}" IsReadOnly="True" Margin="0,8,0,0" CanUserSortColumns="False"
+              GridLinesVisibility="Horizontal" HeadersVisibility="Column">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="#" Binding="{Binding Number}" x:DataType="vm:ActiveRule" />
+        <DataGridTextColumn Header="Rule" Binding="{Binding Name}" x:DataType="vm:ActiveRule" />
+        <DataGridTextColumn Header="" Binding="{Binding State}" x:DataType="vm:ActiveRule" />
+        <DataGridTextColumn Header="Match" Binding="{Binding Match}" Width="*" x:DataType="vm:ActiveRule" />
+        <DataGridTextColumn Header="Action" Binding="{Binding Action}" x:DataType="vm:ActiveRule" />
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>

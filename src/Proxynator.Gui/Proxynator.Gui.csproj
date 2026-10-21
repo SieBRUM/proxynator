@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>proxynator-gui</AssemblyName>
+    <RootNamespace>Proxynator.Gui</RootNamespace>
+    <ApplicationIcon>Assets\proxynator.ico</ApplicationIcon>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- The GUI is an unprivileged client; Windows must not prompt for elevation. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Exe: types are internal by design (CA1515); async continuations must return to the UI thread (CA2007). -->
+    <NoWarn>$(NoWarn);CA2007</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Proxynator.Client\Proxynator.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Proxynator.Gui.Tests" />
+  </ItemGroup>
+
+  <!-- The hook DLLs / preload library, so "Launch" works from the GUI's directory too. -->
+  <Import Project="..\..\build\NativeArtifacts.targets" />
+
+</Project>

@@ -1,4 +1,5 @@
 using Proxynator.Cli;
+using Proxynator.Client;
 using Proxynator.Core.Tests.Support;
 
 namespace Proxynator.Service.Tests;
@@ -88,5 +89,5 @@ public class CliTests
     [InlineData(1023, "1023 B")]
     [InlineData(1536, "1.5 KB")]
     [InlineData(5L * 1024 * 1024 * 1024, "5 GB")]
-    public void Bytes_are_formatted(long bytes, string expected) => Assert.Equal(expected, Format.Bytes(bytes));
+    public void Bytes_are_formatted(long bytes, string expected) => Assert.Equal(expected, DisplayFormat.Bytes(bytes));
 }

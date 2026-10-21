@@ -1,0 +1,108 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:Proxynator.Gui"
+             x:Class="Proxynator.Gui.App"
+             Name="Proxynator"
+             RequestedThemeVariant="Default">
+
+  <Application.DataTemplates>
+    <local:ViewLocator />
+  </Application.DataTemplates>
+
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="AccentBrush" Color="#5B2BC0" />
+          <SolidColorBrush x:Key="SidebarBrush" Color="#F1EEF8" />
+          <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="CardBorderBrush" Color="#E2DDEE" />
+          <SolidColorBrush x:Key="MutedBrush" Color="#6B6677" />
+          <SolidColorBrush x:Key="OkBrush" Color="#1E8E3E" />
+          <SolidColorBrush x:Key="WarningBrush" Color="#B26A00" />
+          <SolidColorBrush x:Key="ErrorBrush" Color="#C5221F" />
+          <SolidColorBrush x:Key="PendingBrush" Color="#FFF4D6" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="AccentBrush" Color="#B79CFF" />
+          <SolidColorBrush x:Key="SidebarBrush" Color="#1E1B26" />
+          <SolidColorBrush x:Key="CardBrush" Color="#26232F" />
+          <SolidColorBrush x:Key="CardBorderBrush" Color="#36323F" />
+          <SolidColorBrush x:Key="MutedBrush" Color="#A9A3B5" />
+          <SolidColorBrush x:Key="OkBrush" Color="#7CE678" />
+          <SolidColorBrush x:Key="WarningBrush" Color="#FFC266" />
+          <SolidColorBrush x:Key="ErrorBrush" Color="#FF8A80" />
+          <SolidColorBrush x:Key="PendingBrush" Color="#3A3220" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+
+      <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas, DejaVu Sans Mono, Liberation Mono, monospace</FontFamily>
+
+      <!-- Navigation icons (24x24). -->
+      <StreamGeometry x:Key="OverviewIcon">M3,3H10V10H3Z M14,3H21V10H14Z M3,14H10V21H3Z M14,14H21V21H14Z</StreamGeometry>
+      <StreamGeometry x:Key="ConnectionsIcon">M3,7H16V4L21,8.5L16,13V10H3Z M21,17H8V20L3,15.5L8,11V14H21Z</StreamGeometry>
+      <StreamGeometry x:Key="RulesIcon">M3,4H6V7H3Z M8,4.5H21V6.5H8Z M3,10.5H6V13.5H3Z M8,11H21V13H8Z M3,17H6V20H3Z M8,17.5H21V19.5H8Z</StreamGeometry>
+      <StreamGeometry x:Key="ProxiesIcon">M1,9H6V15H1Z M9.5,9H14.5V15H9.5Z M18,9H23V15H18Z M6,11.25H9.5V12.75H6Z M14.5,11.25H18V12.75H14.5Z</StreamGeometry>
+      <StreamGeometry x:Key="SettingsIcon">M3,6H21V8H3Z M3,16H21V18H3Z M7,4H10V10H7Z M14,14H17V20H14Z</StreamGeometry>
+      <StreamGeometry x:Key="JsonIcon">M9,3H7C5.9,3 5,3.9 5,5V9C5,10.1 4.1,11 3,11V13C4.1,13 5,13.9 5,15V19C5,20.1 5.9,21 7,21H9V19H7V15C7,13.7 6.4,12.6 5.5,12C6.4,11.4 7,10.3 7,9V5H9Z M15,3H17C18.1,3 19,3.9 19,5V9C19,10.1 19.9,11 21,11V13C19.9,13 19,13.9 19,15V19C19,20.1 18.1,21 17,21H15V19H17V15C17,13.7 17.6,12.6 18.5,12C17.6,11.4 17,10.3 17,9V5H15Z</StreamGeometry>
+      <StreamGeometry x:Key="LaunchIcon">M7,4V20L20,12Z</StreamGeometry>
+      <StreamGeometry x:Key="DiagnosticsIcon">M10,3H14V10H21V14H14V21H10V14H3V10H10Z</StreamGeometry>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Light" Accent="#FF5B2BC0" />
+        <ColorPaletteResources x:Key="Dark" Accent="#FF8F6BFF" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+
+    <Style Selector="TextBlock.h1">
+      <Setter Property="FontSize" Value="24" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,0,0,4" />
+    </Style>
+    <Style Selector="TextBlock.h2">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.label">
+      <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,12,0" />
+    </Style>
+    <Style Selector="TextBlock.error">
+      <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.ok">
+      <Setter Property="Foreground" Value="{DynamicResource OkBrush}" />
+    </Style>
+    <Style Selector="TextBlock.warning">
+      <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="16" />
+    </Style>
+    <Style Selector="TextBox.mono">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+    </Style>
+    <Style Selector="TextBlock.mono">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+    </Style>
+    <Style Selector="StackPanel.toolbar > Button">
+      <Setter Property="Margin" Value="0,0,6,0" />
+    </Style>
+  </Application.Styles>
+</Application>

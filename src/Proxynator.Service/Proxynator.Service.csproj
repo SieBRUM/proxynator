@@ -23,6 +23,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Proxynator.Service.Tests" />
     <InternalsVisibleTo Include="Proxynator.IntegrationTests" />
+    <InternalsVisibleTo Include="Proxynator.Gui.Tests" />
   </ItemGroup>
 
   <!-- WinDivert.dll and WinDivert64.sys ship next to proxynatord (Windows builds only). -->
