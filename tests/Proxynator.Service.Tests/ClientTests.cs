@@ -65,9 +65,9 @@ public class ClientTests
     [Fact]
     public void Windows_runs_proxynatord_next_to_the_gui_when_no_service_is_installed()
     {
-        var plan = ServiceStarter.Plan(new ServiceStartEnvironment(true, "/apps/pn", "proxynator.v1", ServiceInstalled: false, f => f == Path.Combine("/apps/pn", "proxynatord.exe")), out _);
+        var plan = ServiceStarter.Plan(new ServiceStartEnvironment(true, @"C:\Tools\Proxynator\", "proxynator.v1", ServiceInstalled: false, f => f == @"C:\Tools\Proxynator\proxynatord.exe"), out _);
 
-        Assert.Equal(Path.Combine("/apps/pn", "proxynatord.exe"), plan!.FileName);
+        Assert.Equal(@"C:\Tools\Proxynator\proxynatord.exe", plan!.FileName);
         Assert.Empty(plan.Arguments);
     }
 
@@ -101,9 +101,9 @@ public class ClientTests
     [Fact]
     public void A_missing_executable_is_explained()
     {
-        var plan = ServiceStarter.Plan(new ServiceStartEnvironment(true, "/apps/pn", "proxynator.v1", ServiceInstalled: false, _ => false), out var problem);
+        var plan = ServiceStarter.Plan(new ServiceStartEnvironment(true, @"C:\Tools", "proxynator.v1", ServiceInstalled: false, _ => false), out var problem);
 
         Assert.Null(plan);
-        Assert.Contains("proxynatord.exe was not found", problem, StringComparison.Ordinal);
+        Assert.Equal(@"C:\Tools\proxynatord.exe was not found. Start proxynatord from an elevated prompt.", problem);
     }
 }

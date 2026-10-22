@@ -32,7 +32,10 @@ public static class ServiceStarter
         ArgumentNullException.ThrowIfNull(environment);
         problem = string.Empty;
         var useService = environment.ServiceInstalled && environment.Endpoint == (environment.IsWindows ? IpcEndpoint.DefaultPipeName : IpcEndpoint.DefaultUnixSocketPath);
-        var executable = Path.Combine(environment.Directory, environment.IsWindows ? "proxynatord.exe" : "proxynatord");
+        // The target OS's separator, not this process's: planning is tested for both OSes on either.
+        var executable = environment.IsWindows
+            ? $"{environment.Directory.TrimEnd('\\', '/')}\\proxynatord.exe"
+            : $"{environment.Directory.TrimEnd('/')}/proxynatord";
         string[] endpointArguments = environment.Endpoint == (environment.IsWindows ? IpcEndpoint.DefaultPipeName : IpcEndpoint.DefaultUnixSocketPath)
             ? []
             : ["--endpoint", environment.Endpoint];

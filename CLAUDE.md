@@ -443,6 +443,8 @@ Windows (WinDivert, Win32) is only exercised by CI's Windows job; check it after
   palette's accent (set in `App.axaml`).
 - GUI tests run on Avalonia's dispatcher (`[AvaloniaFact]`); awaiting gRPC calls there is fine. Wait for view-model
   state with `Wait.UntilAsync`, never with blocking waits.
+- Pure logic about the *other* OS (Linux paths in `LinuxTerminals`/`ServiceStarter`, tested on Windows too) must not use
+  `Path.Combine`: it joins with this process's separator. Join with the target OS's separator explicitly.
 - Linux `open(2)` flags differ per architecture (x86's `O_DIRECTORY` is arm64's `O_DIRECT`): use `OpenFlags`, never
   hard-coded x86 values. CI's `linux-arm64` job catches such mistakes.
 - The BPF `config` struct, `origin` and `endpoint_key` layouts are mirrored in `BpfCaptureBackend`; ports are network
