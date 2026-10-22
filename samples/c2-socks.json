@@ -1,0 +1,38 @@
+{
+  "$schema": "../schema/config.schema.json",
+  "version": 1,
+  "settings": {
+    "dns": {
+      "mode": "remote",
+      // The target network's names only resolve on the far side.
+      "remoteDomains": ["*corp.local"],
+      "remoteServer": {
+        // A domain controller: SRV lookups (domain controller discovery) go here, as DNS over TCP through the C2.
+        "address": "10.0.0.10",
+        "via": "c2",
+        // The implant's host may not use the domain's DNS: resolve names with the DC instead and give the C2 the
+        // address. Also needed for SOCKS servers that only speak plain SOCKS4.
+        "resolveNames": true
+      }
+    },
+    // C2 SOCKS answers only when the implant checks in: allow for its sleep (interactive mode/sleep 0 is better).
+    "relay": { "connectTimeoutMs": 60000 }
+  },
+  "proxies": [
+    // The C2 framework's SOCKS server on the operator machine (or teamserver, through an SSH tunnel).
+    { "id": "c2", "type": "socks4a", "host": "127.0.0.1", "port": 1080 }
+  ],
+  "rules": [
+    {
+      "name": "target network via the C2",
+      "match": { "hosts": ["*corp.local"] },
+      "action": { "type": "proxy", "target": "c2" }
+    },
+    {
+      // Hosts used by IP address (no name to match).
+      "name": "target ranges via the C2",
+      "match": { "addresses": ["10.0.0.0/8"] },
+      "action": { "type": "proxy", "target": "c2" }
+    }
+  ]
+}

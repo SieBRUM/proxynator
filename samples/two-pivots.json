@@ -1,0 +1,29 @@
+{
+  "$schema": "../schema/config.schema.json",
+  "version": 1,
+  "settings": {
+    "dns": { "mode": "remote", "remoteDomains": ["*corp.local", "*prod.internal"] }
+  },
+  "proxies": [
+    // The first pivot, reachable from this machine (e.g. ssh -D 1080 user@dmz-host).
+    { "id": "dmz", "type": "socks5", "host": "127.0.0.1", "port": 1080 },
+    // A second SOCKS server that only the DMZ host can reach (its address as seen from there).
+    { "id": "prod", "type": "socks5", "host": "172.16.20.5", "port": 1080, "auth": { "username": "op", "password": "change-me" } }
+  ],
+  "chains": [
+    // dmz is connected to directly, prod through dmz.
+    { "id": "dmz-then-prod", "hops": ["dmz", "prod"] }
+  ],
+  "rules": [
+    {
+      "name": "production network through both pivots",
+      "match": { "hosts": ["*prod.internal"] },
+      "action": { "type": "proxy", "target": "dmz-then-prod" }
+    },
+    {
+      "name": "corp network through the first pivot",
+      "match": { "hosts": ["*corp.local"] },
+      "action": { "type": "proxy", "target": "dmz" }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "../schema/config.schema.json",
+  "version": 1,
+  "settings": {
+    "capture": { "mode": "auto" },
+    // Browsers prefer QUIC (HTTP/3 over UDP), which Burp cannot see: block it so they use HTTP/1.1 or HTTP/2 over TCP.
+    "udp": { "blockQuic": true }
+  },
+  "proxies": [
+    { "id": "burp", "type": "http", "host": "127.0.0.1", "port": 8080 }
+  ],
+  "rules": [
+    {
+      // Burp's own upstream connections must not loop back into Burp.
+      "name": "Burp itself goes direct",
+      "match": { "processes": ["BurpSuite*", "burpsuite*", "java*"] },
+      "action": { "type": "direct" }
+    },
+    {
+      // Web traffic of the browsers (including their sandboxed child processes), wherever it goes.
+      "name": "browsers via Burp",
+      "match": { "processes": ["firefox*", "chrome*", "msedge*", "chromium*"], "includeChildren": true, "ports": ["80", "443", "8080", "8443"] },
+      "action": { "type": "proxy", "target": "burp" }
+    }
+  ]
+}

@@ -170,7 +170,12 @@ remote mode is on — the system resolver would return Proxynator's own fake ans
 `settings.dns.remoteServer` (`{ address, port, via }`): in remote mode, queries for remote domains that the fake
 responder does not answer (SRV, TXT, MX, ...: domain controller discovery) go to that DNS server as DNS over TCP
 through the `via` route (`RemoteDnsClient`, used by the UDP relay's DNS sessions and by `DnsForwarder`). Failure →
-SERVFAIL, never the local DNS. A/AAAA stay fake.
+SERVFAIL, never the local DNS. A/AAAA stay fake. With `remoteServer.resolveNames`, the TCP relay also resolves
+remote-domain names there (`RemoteDnsClient.ResolveAsync`: an A query through the route, cached 60 s) and gives the
+proxy the address instead of the name: for pivots that cannot resolve internal names and for plain SOCKS4. Unknown
+name → the connection fails (closed). Without it, a name-only target whose route ends in plain `socks4` is refused
+with an explanation (never resolved locally: that would give the proxy a fake address or fail), and `doctor` warns
+about remote DNS + SOCKS4 routes. These C2/pivot situations are reproduced in `C2SocksScenarioTests` (see ADR 0007).
 
 Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost.exe`), not by the app, so per-process attribution of DNS packets is impossible in `windivert` mode. `remote` mode in `windivert` is therefore applied system-wide for the listed domains (relay sends non-proxied fake-IP connections direct after real resolution). That includes the service's own process and in-process tests: resolve real addresses before turning remote mode on. In `injection`, `preload` and `ebpf` modes it is per-process (resolver hooks, or the eBPF DNS redirect of candidate processes). Apps using their own DoH just look like ordinary TCP/443 flows and are handled by the rules.
 
@@ -263,6 +268,10 @@ Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost
   (`PreloadLauncher`; the terminal runs `env LD_PRELOAD=... PROXYNATOR_HOOK_ENDPOINT=... $SHELL`, `LinuxTerminals`
   picks `x-terminal-emulator` first).
 - File pickers are behind `IFileDialogs` so view models are testable.
+- The unreachable-service banner has **Start proxynatord** (`ServiceStarter` in `Proxynator.Client`, behind
+  `IServiceLauncher`): Windows runs the installed service (`sc.exe start`) or `proxynatord.exe` next to the GUI through
+  UAC (`runas`); Linux runs `pkexec systemctl start proxynatord` (unit installed) or `pkexec <dir>/proxynatord`. A
+  non-default endpoint bypasses the installed service and is passed on. `ServiceStarter.Plan` is pure (tested on any OS).
 
 ## Repository layout
 
@@ -292,7 +301,7 @@ src/
   Proxynator.Service/              proxynatord: ServiceHost (Kestrel on pipe/socket, Windows service, systemd),
                                    ProxynatorEngine, ControlService (gRPC), platform selection
   Proxynator.Client/               shared by CLI and GUI: ProgramLauncher (run/attach/hooked terminal), LinuxTerminals,
-                                   ArgumentSplitter, DisplayFormat, ServiceHints
+                                   ArgumentSplitter, DisplayFormat, ServiceHints, ServiceStarter (elevated start)
   Proxynator.Cli/                  proxynator CLI (System.CommandLine; Commands.cs is testable with captured output;
                                    InjectionCommands.cs: run, attach)
   Proxynator.Gui/                  proxynator-gui (Avalonia): Services/ (ServiceConnection, file dialogs),
@@ -323,8 +332,12 @@ tests/
                                    tagged [Trait("Category","Integration")], skipped elsewhere unless
                                    PROXYNATOR_REQUIRE_INTEGRATION=1 (CI), which turns a skip into a failure
 schema/                            config JSON schema (keep in sync with the config model)
-samples/                           example configs (every samples/*.json is loaded by a test, so they must stay valid)
-docs/                              design notes, ADRs (docs/adr/NNNN-title.md), images/ (README screenshots)
+samples/                           example configs (every samples/*.json is loaded by a test, so they must stay valid);
+                                   the guides link to them
+docs/                              user documentation (GUI-first; every guide has GUI steps + JSON): README.md (index),
+                                   installation, gui, configuration, cli, troubleshooting, building, guides/ (burp,
+                                   internal-domain, c2-socks, active-directory, chains, hooking), images/ (GUI
+                                   screenshots from the GUI tests), adr/ (design decisions, NNNN-title.md)
 .github/workflows/                 CI
 ```
 
@@ -346,7 +359,10 @@ docs/                              design notes, ADRs (docs/adr/NNNN-title.md), 
   table-driven tests. Relay tests simulate a capture backend: bind the client socket, register it in the
   `OriginalDestinationTable`, connect to the relay.
 - Architecture decisions that change any of the above get an ADR in `docs/adr/`.
-- Commits: imperative mood, focused. Keep `README.md` and this file up to date when behaviour or layout changes.
+- Commits: imperative mood, focused. Keep `README.md`, `docs/` and this file up to date when behaviour or layout
+  changes. The README is a short front page; details go into `docs/`. Guides lead with the GUI and show the same
+  setup as JSON. `DocumentationTests` validates every complete JSON configuration in the README and `docs/` and
+  every relative link and `#anchor`, so examples and links can't rot.
 
 ## Build, test, run
 
@@ -444,4 +460,6 @@ Windows (WinDivert, Win32) is only exercised by CI's Windows job; check it after
 - [x] Phase 6 — Avalonia GUI (`proxynator-gui`): overview, live connections, rule/proxy/chain/settings editors on a
   validated working copy, JSON, launching hooked programs and terminals, attach (Windows), diagnostics.
 - [x] Releases — every push to `main` publishes tested packages for Windows x64, Linux x64 and Linux arm64.
+- [x] 1.0 — C2/pivot DNS handling (`remoteServer.resolveNames`, SOCKS4 refusal, scenario tests), start the service
+  from the GUI, user documentation in `docs/`.
 - [ ] Later — connection log export, pcap output, statistics, `https` (TLS-to-proxy) hops, Windows ARM64 (WinDivert has no ARM64 build; would need ARM64 hook DLLs).
