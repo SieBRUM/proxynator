@@ -52,6 +52,20 @@ internal sealed class FakeProxyServer : IAsyncDisposable
     /// <summary>Accept connections but never answer (to test timeouts).</summary>
     public bool NeverRespond { get; init; }
 
+    /// <summary>
+    /// SOCKS5 <c>UDP ASSOCIATE</c> support. Like <c>ssh -D</c>, chisel and most C2 SOCKS servers, false answers
+    /// "command not supported".
+    /// </summary>
+    public bool SupportsUdp { get; init; } = true;
+
+    /// <summary>Refuse requests by name ("host unreachable"), like a pivot host that cannot resolve internal names.</summary>
+    public bool CannotResolveNames { get; init; }
+
+    /// <summary>The number of UDP ASSOCIATE requests received.</summary>
+    public int UdpAssociateRequests => Volatile.Read(ref udpAssociateRequests);
+
+    private int udpAssociateRequests;
+
     /// <summary>Maps a request to the endpoint actually connected to.</summary>
     public Func<FakeProxyRequest, IPEndPoint> Resolve { get; init; } =
         request => new IPEndPoint(request.Address ?? IPAddress.Loopback, request.Port);
@@ -131,8 +145,9 @@ internal sealed class FakeProxyServer : IAsyncDisposable
 
         var request = new FakeProxyRequest(host, address, port, null, null, userId);
         Requests.Enqueue(request);
-        await stream.WriteAsync(new byte[] { 0, (byte)(RejectAll ? 91 : 90), 0, 0, 0, 0, 0, 0 }, stop.Token);
-        return RejectAll ? null : request;
+        var rejected = RejectAll || (CannotResolveNames && host is not null);
+        await stream.WriteAsync(new byte[] { 0, (byte)(rejected ? 91 : 90), 0, 0, 0, 0, 0, 0 }, stop.Token);
+        return rejected ? null : request;
     }
 
     private async Task<FakeProxyRequest?> HandshakeSocks5Async(NetworkStream stream)
@@ -171,6 +186,13 @@ internal sealed class FakeProxyServer : IAsyncDisposable
         if (header[1] == 3)
         {
             await ReadAsync(stream, header[3] == 4 ? 18 : 6); // the (unused) client address of UDP ASSOCIATE
+            Interlocked.Increment(ref udpAssociateRequests);
+            if (!SupportsUdp)
+            {
+                await stream.WriteAsync(new byte[] { 5, 7, 0, 1, 0, 0, 0, 0, 0, 0 }, stop.Token); // command not supported
+                return null;
+            }
+
             await RunUdpAssociationAsync(stream);
             return null;
         }
@@ -192,8 +214,9 @@ internal sealed class FakeProxyServer : IAsyncDisposable
         var port = BinaryPrimitives.ReadUInt16BigEndian(await ReadAsync(stream, 2));
         var request = new FakeProxyRequest(host, address, port, user, password, null);
         Requests.Enqueue(request);
-        await stream.WriteAsync(new byte[] { 5, (byte)(RejectAll ? 5 : 0), 0, 1, 0, 0, 0, 0, 0, 0 }, stop.Token);
-        return RejectAll ? null : request;
+        var reply = RejectAll ? 5 : CannotResolveNames && host is not null ? 4 : 0; // 4: host unreachable
+        await stream.WriteAsync(new byte[] { 5, (byte)reply, 0, 1, 0, 0, 0, 0, 0, 0 }, stop.Token);
+        return reply == 0 ? request : null;
     }
 
     private async Task<FakeProxyRequest?> HandshakeHttpAsync(NetworkStream stream)

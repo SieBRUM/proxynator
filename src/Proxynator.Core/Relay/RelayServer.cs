@@ -25,6 +25,7 @@ public sealed class RelayServer : IAsyncDisposable
     private readonly ConnectionTracker tracker;
     private readonly ITcpConnector connector;
     private readonly ProxyRouteDialer dialer;
+    private readonly RemoteDnsClient remoteDns;
     private readonly ILogger logger;
     private readonly FakeIpPool? fakeIps;
     private readonly CancellationTokenSource shutdown = new();
@@ -60,6 +61,7 @@ public sealed class RelayServer : IAsyncDisposable
         this.fakeIps = fakeIps;
         this.connector = connector ?? new TcpConnector(resolver: resolver);
         dialer = new ProxyRouteDialer(this.connector);
+        remoteDns = new RemoteDnsClient(dialer, logger);
     }
 
     /// <summary>The endpoints the relay is listening on (with actual ports when port 0 was requested).</summary>
@@ -247,7 +249,7 @@ public sealed class RelayServer : IAsyncDisposable
                     return;
                 }
 
-                var upstream = await ConnectUpstreamAsync(connection, settings, cancellationToken).ConfigureAwait(false);
+                var upstream = await ConnectUpstreamAsync(connection, active, cancellationToken).ConfigureAwait(false);
                 if (upstream is null)
                 {
                     Reset(clientSocket);
@@ -273,21 +275,45 @@ public sealed class RelayServer : IAsyncDisposable
     }
 
     /// <summary>Returns the upstream stream, or <see langword="null"/> (after logging) if it could not be established.</summary>
-    private async Task<Stream?> ConnectUpstreamAsync(TrackedConnection connection, ProxynatorSettings settings, CancellationToken cancellationToken)
+    private async Task<Stream?> ConnectUpstreamAsync(TrackedConnection connection, ActiveConfiguration active, CancellationToken cancellationToken)
     {
         var context = connection.Context;
         var decision = connection.Decision;
+        var settings = active.Settings;
         var timeout = TimeSpan.FromMilliseconds(settings.Relay.ConnectTimeoutMs);
 
         if (decision.Action == RuleActionType.Proxy)
         {
+            var route = decision.Route!;
+            var target = BuildProxyTarget(context, settings.Dns.Mode);
+            if (target.Address is null && settings.Dns.RemoteServer is { ResolveNames: true } && active.ShouldFakeResolve(target.Host!))
+            {
+                // The proxy cannot resolve internal names: ask the target network's DNS server, through the tunnel.
+                if (await remoteDns.ResolveAsync(active, target.Host!, cancellationToken).ConfigureAwait(false) is not { } resolved)
+                {
+                    RelayLog.ProxyFailed(logger, connection.Id, context.DestinationDisplay, route.Id,
+                        $"the remote DNS server has no address for {target.Host} (remoteServer.resolveNames)");
+                    return null;
+                }
+
+                target = TargetEndpoint.FromAddress(resolved, target.Port);
+            }
+            else if (target.Address is null && route.Hops[^1].Type == ProxyType.Socks4)
+            {
+                // Never resolve such a name here: it is only known on the far side, or locally it is a fake address.
+                RelayLog.ProxyFailed(logger, connection.Id, context.DestinationDisplay, route.Id,
+                    $"SOCKS4 cannot send the name {target.Host} to proxy '{route.Hops[^1].Id}', and only the far side can resolve it. " +
+                    "Use a socks4a or socks5 proxy, or set settings.dns.remoteServer.resolveNames");
+                return null;
+            }
+
             try
             {
-                return await dialer.ConnectAsync(decision.Route!, BuildProxyTarget(context, settings.Dns.Mode), timeout, cancellationToken).ConfigureAwait(false);
+                return await dialer.ConnectAsync(route, target, timeout, cancellationToken).ConfigureAwait(false);
             }
             catch (ProxyException ex)
             {
-                RelayLog.ProxyFailed(logger, connection.Id, context.DestinationDisplay, decision.Route!.Id, ex.Message);
+                RelayLog.ProxyFailed(logger, connection.Id, context.DestinationDisplay, route.Id, ex.Message);
                 return null;
             }
         }

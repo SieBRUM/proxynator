@@ -32,7 +32,7 @@
         </Border>
 
         <Border Classes="card">
-          <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
+          <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
             <TextBlock Classes="h2" Grid.ColumnSpan="2" Text="DNS" />
             <TextBlock Grid.Row="1" Classes="label" Text="DNS mode" />
             <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
@@ -64,6 +64,10 @@
             <AutoCompleteBox Grid.Row="6" Grid.Column="1" IsVisible="{Binding UseRemoteServer}" Text="{Binding RemoteServerVia}" Width="200" HorizontalAlignment="Left"
                              ItemsSource="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).Workspace.TargetIds}"
                              FilterMode="Contains" MinimumPrefixLength="0" PlaceholderText="proxy or chain ID" />
+            <StackPanel Grid.Row="7" Grid.Column="1" Spacing="2" IsVisible="{Binding UseRemoteServer}">
+              <CheckBox Content="Also resolve names with this server, and give the proxy the address" IsChecked="{Binding RemoteServerResolveNames}" />
+              <TextBlock Classes="muted" FontSize="12" Text="For SOCKS servers that cannot resolve internal names themselves (a pivot host that doesn't use the domain's DNS), and for plain SOCKS4." />
+            </StackPanel>
           </Grid>
         </Border>
 

@@ -21,6 +21,29 @@ internal sealed class FakeFileDialogs : IFileDialogs
     public Task<string?> PickFolderAsync(string title) => Task.FromResult(FolderPath);
 }
 
+/// <summary>A launcher that records what it was asked to run instead of running it.</summary>
+internal sealed class FakeServiceLauncher(Proxynator.Client.ServiceStartPlan? plan, string problem = "", string? startFailure = null, Action? onStart = null) : IServiceLauncher
+{
+    public List<Proxynator.Client.ServiceStartPlan> Started { get; } = [];
+
+    public Proxynator.Client.ServiceStartPlan? Plan(string endpoint, out string problemText)
+    {
+        problemText = problem;
+        return plan;
+    }
+
+    public string? Start(Proxynator.Client.ServiceStartPlan startPlan)
+    {
+        Started.Add(startPlan);
+        if (startFailure is null)
+        {
+            onStart?.Invoke();
+        }
+
+        return startFailure;
+    }
+}
+
 /// <summary>An in-process proxynatord and the GUI's view model connected to it.</summary>
 internal sealed class GuiHarness : IAsyncDisposable
 {

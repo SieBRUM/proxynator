@@ -16,4 +16,11 @@ public sealed record RemoteDnsServer
 
     /// <summary>The proxy or chain to reach it through.</summary>
     public required string Via { get; init; }
+
+    /// <summary>
+    /// Also resolve the addresses of remote domains with this server (A records), and give proxies the address
+    /// instead of the name. For proxies that cannot resolve internal names themselves, e.g. a SOCKS server on a pivot
+    /// host that does not use the target network's DNS. Off by default: the proxy resolves.
+    /// </summary>
+    public bool ResolveNames { get; set; }
 }

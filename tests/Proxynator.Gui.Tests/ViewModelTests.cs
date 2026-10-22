@@ -45,6 +45,70 @@ public class ViewModelTests
     }
 
     [AvaloniaFact]
+    public async Task Start_service_explains_when_the_service_cannot_be_started_from_the_gui()
+    {
+        var launcher = new FakeServiceLauncher(plan: null, problem: "pkexec is not installed. Run: sudo systemctl start proxynatord");
+        using var viewModel = new MainWindowViewModel(new ServiceConnection(MissingEndpoint()), new FakeFileDialogs(), launcher);
+
+        await viewModel.StartServiceCommand.ExecuteAsync(null);
+
+        Assert.Equal("pkexec is not installed. Run: sudo systemctl start proxynatord", viewModel.StartServiceMessage);
+        Assert.Empty(launcher.Started);
+    }
+
+    [AvaloniaFact]
+    public async Task Start_service_reports_a_cancelled_elevation_prompt()
+    {
+        var plan = new Proxynator.Client.ServiceStartPlan("proxynatord.exe", [], "proxynatord.exe (as Administrator)");
+        var launcher = new FakeServiceLauncher(plan, startFailure: "Cancelled: proxynatord needs Administrator rights.");
+        using var viewModel = new MainWindowViewModel(new ServiceConnection(MissingEndpoint()), new FakeFileDialogs(), launcher);
+
+        await viewModel.StartServiceCommand.ExecuteAsync(null);
+
+        Assert.Equal("Cancelled: proxynatord needs Administrator rights.", viewModel.StartServiceMessage);
+        Assert.False(viewModel.State.IsConnected);
+    }
+
+    [AvaloniaFact]
+    public async Task Start_service_waits_for_the_service_and_loads_it()
+    {
+        var plan = new Proxynator.Client.ServiceStartPlan("/usr/bin/pkexec", ["systemctl", "start", "proxynatord"], "pkexec systemctl start proxynatord");
+        var directory = Directory.CreateTempSubdirectory("pn-start-").FullName;
+        Task<TestService>? started = null;
+        var endpoint = TestService.NewEndpoint(directory);
+
+        // "Elevation" starts the service in the background, like the real prompt does; the view model waits for it.
+        var launcher = new FakeServiceLauncher(plan, onStart: () => started = Task.Run(() => TestService.StartAsync(endpoint: endpoint, initialConfigJson: GuiHarness.SampleConfig)));
+        using var viewModel = new MainWindowViewModel(new ServiceConnection(endpoint), new FakeFileDialogs(), launcher);
+        try
+        {
+            await viewModel.TickAsync();
+            Assert.False(viewModel.State.IsConnected);
+
+            await viewModel.StartServiceCommand.ExecuteAsync(null);
+
+            Assert.True(viewModel.State.IsConnected);
+            Assert.Equal(string.Empty, viewModel.StartServiceMessage);
+            Assert.Single(launcher.Started);
+            Assert.True(viewModel.Workspace.IsLoaded);
+            Assert.Equal(4, viewModel.Workspace.Rules.Count);
+        }
+        finally
+        {
+            if (started is not null)
+            {
+                await (await started).DisposeAsync();
+            }
+
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static string MissingEndpoint() => OperatingSystem.IsWindows()
+        ? $"proxynator-missing-{Guid.NewGuid():N}"
+        : Path.Combine(Path.GetTempPath(), $"pn-missing-{Guid.NewGuid():N}.sock");
+
+    [AvaloniaFact]
     public async Task Rules_edited_in_the_gui_are_applied_and_saved()
     {
         await using var gui = await GuiHarness.StartAsync(GuiHarness.SampleConfig);
