@@ -1,0 +1,20 @@
+{
+  "$schema": "../schema/config.schema.json",
+  "version": 1,
+  "settings": {
+    // Machine-wide capture, but only the program below is redirected. QUIC is blocked so it falls back to TLS over TCP.
+    "capture": { "mode": "auto" },
+    "udp": { "blockQuic": true }
+  },
+  "proxies": [
+    { "id": "burp", "type": "http", "host": "127.0.0.1", "port": 8080 }
+  ],
+  "rules": [
+    {
+      // A thick client that ignores proxy settings, and everything it starts (updaters, helpers, embedded browsers).
+      "name": "thick client via Burp",
+      "match": { "processes": ["thickclient.exe", "thickclient"], "includeChildren": true },
+      "action": { "type": "proxy", "target": "burp" }
+    }
+  ]
+}

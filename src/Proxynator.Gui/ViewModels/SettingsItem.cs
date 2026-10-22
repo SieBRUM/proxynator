@@ -32,6 +32,10 @@ internal sealed partial class SettingsItem : ObservableObject
     [ObservableProperty]
     public partial string RemoteServerVia { get; set; } = string.Empty;
 
+    /// <summary>Resolve remote domains with the remote server and give proxies addresses (for pivots that cannot resolve).</summary>
+    [ObservableProperty]
+    public partial bool RemoteServerResolveNames { get; set; }
+
     [ObservableProperty]
     public partial string SniffTimeoutMs { get; set; } = "250";
 
@@ -57,6 +61,7 @@ internal sealed partial class SettingsItem : ObservableObject
             RemoteServerAddress = dns.RemoteServer?.Address ?? string.Empty,
             RemoteServerPort = (dns.RemoteServer?.Port ?? 53).ToString(CultureInfo.InvariantCulture),
             RemoteServerVia = dns.RemoteServer?.Via ?? string.Empty,
+            RemoteServerResolveNames = dns.RemoteServer?.ResolveNames ?? false,
             SniffTimeoutMs = dns.SniffTimeoutMs.ToString(CultureInfo.InvariantCulture),
             BlockQuic = settings.Udp.BlockQuic,
             ConnectTimeoutMs = settings.Relay.ConnectTimeoutMs.ToString(CultureInfo.InvariantCulture),
@@ -77,6 +82,7 @@ internal sealed partial class SettingsItem : ObservableObject
                 Address = RemoteServerAddress.Trim(),
                 Port = Number(RemoteServerPort, "$.settings.dns.remoteServer.port", 53),
                 Via = RemoteServerVia.Trim(),
+                ResolveNames = RemoteServerResolveNames,
             }
             : null;
         return original with

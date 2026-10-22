@@ -203,6 +203,17 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
             results.Add(servers.Count > 0
                 ? new DiagnosticResult("Remote DNS", DiagnosticStatus.Ok, $"Fake addresses from {FakeIps.Range} ({FakeIps.Count} name(s) mapped); the service resolves through {string.Join(", ", servers)}.")
                 : new DiagnosticResult("Remote DNS", DiagnosticStatus.Warning, "No upstream DNS servers were found, so the service's own lookups (direct connections to faked names) may fail."));
+
+            // Remote DNS hands proxies names; plain SOCKS4 can only take addresses (SOCKS4a can take names).
+            var socks4Routes = active.Routes.Values.Where(route => route.Hops[^1].Type == ProxyType.Socks4).Select(route => route.Id).ToList();
+            if (socks4Routes.Count > 0 && active.Settings.Dns.RemoteServer is not { ResolveNames: true })
+            {
+                results.Add(new DiagnosticResult(
+                    "Remote DNS and SOCKS4",
+                    DiagnosticStatus.Warning,
+                    $"{string.Join(", ", socks4Routes.Select(id => $"'{id}'"))} end(s) in a SOCKS4 proxy, which cannot carry names: connections to remote-domain names through it are refused. " +
+                    "Use socks4a or socks5 (most C2 SOCKS servers support one), or set settings.dns.remoteServer.resolveNames."));
+            }
         }
 
         if (active.Config.Rules.Count == 0)

@@ -13,12 +13,14 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     public static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(2);
 
     private readonly ServiceConnection service;
+    private readonly IServiceLauncher launcher;
     private DispatcherTimer? timer;
     private bool refreshing;
 
-    public MainWindowViewModel(ServiceConnection service, IFileDialogs dialogs)
+    public MainWindowViewModel(ServiceConnection service, IFileDialogs dialogs, IServiceLauncher? launcher = null)
     {
         this.service = service;
+        this.launcher = launcher ?? new ServiceLauncher();
         State = new ServiceState(service);
         Workspace = new ConfigWorkspace(service);
         Overview = new OverviewViewModel(service, State);
@@ -106,6 +108,42 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         finally
         {
             refreshing = false;
+        }
+    }
+
+    /// <summary>The result of the last "Start proxynatord" (or why it cannot be started from here).</summary>
+    [ObservableProperty]
+    public partial string StartServiceMessage { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// Starts proxynatord elevated (UAC / polkit prompt): the installed service, or the executable next to the GUI.
+    /// The next refresh picks it up once it accepts connections.
+    /// </summary>
+    [RelayCommand]
+    private async Task StartServiceAsync()
+    {
+        if (launcher.Plan(service.Endpoint, out var problem) is not { } plan)
+        {
+            StartServiceMessage = problem;
+            return;
+        }
+
+        if (launcher.Start(plan) is { } failure)
+        {
+            StartServiceMessage = failure;
+            return;
+        }
+
+        StartServiceMessage = $"Started: {plan.Description}. Waiting for it to accept connections…";
+        for (var attempt = 0; attempt < 20 && !await State.RefreshAsync(); attempt++)
+        {
+            await Task.Delay(500);
+        }
+
+        StartServiceMessage = State.IsConnected ? string.Empty : $"{plan.Description} was started, but proxynatord is not answering yet. Check its window or 'journalctl -u proxynatord'.";
+        if (State.IsConnected)
+        {
+            await TickAsync();
         }
     }
 

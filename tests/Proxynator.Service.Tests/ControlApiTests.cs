@@ -112,6 +112,34 @@ public class ControlApiTests
         Assert.Equal((4, 4), (closed.Connection.BytesSent, closed.Connection.BytesReceived));
     }
 
+    [Theory]
+    [InlineData("socks4", "", true)]
+    [InlineData("socks4", ", \"remoteServer\": { \"address\": \"10.0.0.10\", \"via\": \"pivot\", \"resolveNames\": true }", false)]
+    [InlineData("socks4a", "", false)]
+    public async Task Diagnostics_warn_that_plain_socks4_cannot_carry_remote_dns_names(string type, string remoteServer, bool warns)
+    {
+        await using var service = await StartWithConfigAsync($$"""
+            {
+              "version": 1,
+              "settings": { "dns": { "mode": "remote", "remoteDomains": ["*corp.local"]{{remoteServer}} } },
+              "proxies": [ { "id": "pivot", "type": "{{type}}", "host": "127.0.0.1", "port": 1 } ],
+              "rules": [ { "name": "corp", "match": { "hosts": ["*corp.local"] }, "action": { "type": "proxy", "target": "pivot" } } ]
+            }
+            """);
+
+        var results = (await service.Client.RunDiagnosticsAsync(new RunDiagnosticsRequest(), cancellationToken: TestTimeout.Token())).Results;
+
+        Assert.Equal(warns, results.Any(r => r.Name == "Remote DNS and SOCKS4" && r.Status == DiagnosticStatus.Warning && r.Detail.Contains("'pivot'", StringComparison.Ordinal)));
+    }
+
+    private static async Task<TestService> StartWithConfigAsync(string json)
+    {
+        var service = await TestService.StartAsync();
+        var applied = await service.Client.ApplyConfigAsync(new ApplyConfigRequest { Json = json }, cancellationToken: TestTimeout.Token());
+        Assert.True(applied.Applied, string.Join("; ", applied.Errors.Select(e => $"{e.Path}: {e.Message}")));
+        return service;
+    }
+
     [Fact]
     public async Task Diagnostics_include_platform_relay_and_proxy_checks()
     {

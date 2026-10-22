@@ -17,6 +17,6 @@
     <Copyright>Copyright 2026 The Proxynator Authors</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/SieBRUM/proxynator</RepositoryUrl>
-    <Version>0.1.0</Version>
+    <Version>1.0.0</Version>
   </PropertyGroup>
 </Project>

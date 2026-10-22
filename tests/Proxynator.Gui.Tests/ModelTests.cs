@@ -76,6 +76,7 @@ public class ModelTests
 
         Assert.Empty(problems);
         Assert.True(settings.Capture.ProxyLoopback);
+        Assert.False(item.RemoteServerResolveNames);
         Assert.Equal(3000, settings.Relay.ConnectTimeoutMs);
         Assert.Null(settings.Dns.RemoteServer);
     }
@@ -86,4 +87,21 @@ public class ModelTests
     [InlineData(new[] { "--endpoint=/tmp/x.sock", "--other" }, "/tmp/x.sock")]
     public void The_endpoint_comes_from_the_command_line(string[] args, string? expected) =>
         Assert.Equal(expected ?? Ipc.IpcEndpoint.Default, GuiOptions.Parse(args).Endpoint);
+
+    [Fact]
+    public void The_remote_server_and_its_resolve_names_option_round_trip()
+    {
+        var original = new ProxynatorSettings
+        {
+            Dns = new DnsSettings { Mode = DnsMode.Remote, RemoteServer = new RemoteDnsServer { Address = "10.0.0.10", Via = "pivot", ResolveNames = true } },
+        };
+        List<ConfigError> problems = [];
+
+        var item = SettingsItem.From(original);
+        var settings = item.ToSettings(original, problems);
+
+        Assert.True(item.RemoteServerResolveNames);
+        Assert.Empty(problems);
+        Assert.Equal(original.Dns.RemoteServer, settings.Dns.RemoteServer);
+    }
 }

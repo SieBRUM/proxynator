@@ -43,7 +43,7 @@ internal sealed class TestService : IAsyncDisposable
         ? $"proxynator-test-{Guid.NewGuid():N}"
         : Path.Combine(directory, "s.sock");
 
-    public static async Task<TestService> StartAsync(IPlatformModule? platform = null, bool noCapture = true, string? initialConfigJson = null)
+    public static async Task<TestService> StartAsync(IPlatformModule? platform = null, bool noCapture = true, string? initialConfigJson = null, string? endpoint = null)
     {
         var directory = Directory.CreateTempSubdirectory("pn-").FullName;
         var configPath = Path.Combine(directory, "config.json");
@@ -52,7 +52,7 @@ internal sealed class TestService : IAsyncDisposable
             await File.WriteAllTextAsync(configPath, initialConfigJson);
         }
 
-        var endpoint = NewEndpoint(directory);
+        endpoint ??= NewEndpoint(directory);
         var options = new ServiceOptions { ConfigPath = configPath, Endpoint = endpoint, NoCapture = noCapture };
         var app = ServiceHost.Build(options, platform ?? new TestPlatformModule());
         var service = new TestService(app, endpoint, directory, configPath);

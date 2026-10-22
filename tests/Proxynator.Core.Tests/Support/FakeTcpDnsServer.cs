@@ -8,7 +8,8 @@ namespace Proxynator.Core.Tests.Support;
 
 /// <summary>
 /// A DNS-over-TCP server on loopback, standing in for a domain controller's DNS: every SRV query is answered with one
-/// record pointing at <see cref="SrvTarget"/> on port 389; other queries get an empty answer. Records the names asked.
+/// record pointing at <see cref="SrvTarget"/> on port 389, A queries from <see cref="Addresses"/>; other queries get an
+/// empty answer. Records the names asked.
 /// </summary>
 internal sealed class FakeTcpDnsServer : IAsyncDisposable
 {
@@ -16,14 +17,18 @@ internal sealed class FakeTcpDnsServer : IAsyncDisposable
     private readonly CancellationTokenSource stop = new();
     private readonly Task loop;
 
-    public FakeTcpDnsServer(string srvTarget = "dc01.corp.local")
+    public FakeTcpDnsServer(string srvTarget = "dc01.corp.local", IReadOnlyDictionary<string, IPAddress>? addresses = null)
     {
         SrvTarget = srvTarget;
+        Addresses = addresses ?? new Dictionary<string, IPAddress>();
         listener.Start();
         loop = ServeAsync();
     }
 
     public string SrvTarget { get; }
+
+    /// <summary>A records: name → IPv4 address. Other names get an empty answer.</summary>
+    public IReadOnlyDictionary<string, IPAddress> Addresses { get; }
 
     public IPEndPoint Endpoint => (IPEndPoint)listener.LocalEndpoint;
 
@@ -99,11 +104,18 @@ internal sealed class FakeTcpDnsServer : IAsyncDisposable
         var response = new List<byte>(query[..questionEnd]);
         response[2] = (byte)(0x80 | (query[2] & 0x01));
         response[3] = 0x80;
-        var answers = type == 33 ? 1 : 0;
+        var name = string.Join('.', labels);
+        var address = type == 1 && Addresses.TryGetValue(name, out var found) ? found : null;
+        var answers = type == 33 || address is not null ? 1 : 0;
         response[6] = 0;
         response[7] = (byte)answers;
         response[8] = response[9] = response[10] = response[11] = 0;
-        if (answers == 1)
+        if (address is not null)
+        {
+            response.AddRange([0xC0, 0x0C, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4]); // name pointer, A, IN, TTL 60, length 4
+            response.AddRange(address.GetAddressBytes());
+        }
+        else if (answers == 1)
         {
             var target = new List<byte>();
             foreach (var label in SrvTarget.Split('.'))

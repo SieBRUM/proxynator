@@ -100,6 +100,11 @@
                   "type": "string",
                   "minLength": 1,
                   "description": "Proxy or chain id to reach the server through."
+                },
+                "resolveNames": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Also resolve the addresses of remoteDomains with this server and give proxies the address instead of the name. For proxies that cannot resolve internal names themselves."
                 }
               }
             }
