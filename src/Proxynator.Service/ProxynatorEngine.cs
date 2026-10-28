@@ -39,6 +39,9 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
 
     public ModeAwareResolver Resolver { get; private set; } = null!;
 
+    /// <summary>The DNS answers the service resolved itself (relays and <see cref="Resolver"/>).</summary>
+    public DnsCache DnsCache { get; } = new();
+
     public UdpRelayServer? UdpRelay { get; private set; }
 
     public ConnectionTracker Tracker { get; } = new();
@@ -76,7 +79,7 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
         FakeIps = new FakeIpPool(AddressRange.TryParse(Configuration.Current.Settings.Dns.FakeIpRange, out var fakeRange)
             ? fakeRange
             : throw new InvalidOperationException("The validated fake-IP range did not parse."));
-        Resolver = new ModeAwareResolver(Configuration, new UpstreamDnsResolver(UpstreamDnsResolver.DiscoverSystemServers(FakeIps.Range)));
+        Resolver = new ModeAwareResolver(Configuration, new UpstreamDnsResolver(UpstreamDnsResolver.DiscoverSystemServers(FakeIps.Range)), DnsCache);
 
         if (options.NoCapture)
         {
@@ -90,11 +93,11 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
 
         var listenEndpoints = capture?.RelayListenEndpoints ?? [new IPEndPoint(IPAddress.Loopback, 0)];
         Relay = new RelayServer(
-            Configuration, Destinations, platform.ProcessInfo, Tracker, loggerFactory.CreateLogger<RelayServer>(), fakeIps: FakeIps, resolver: Resolver);
+            Configuration, Destinations, platform.ProcessInfo, Tracker, loggerFactory.CreateLogger<RelayServer>(), fakeIps: FakeIps, resolver: Resolver, dnsCache: DnsCache);
         Relay.Start(listenEndpoints);
         UdpRelay = new UdpRelayServer(
             Configuration, UdpDestinations, platform.ProcessInfo, Tracker, loggerFactory.CreateLogger<UdpRelayServer>(),
-            FakeIps, Resolver, new TcpConnector(resolver: Resolver));
+            FakeIps, Resolver, new TcpConnector(resolver: Resolver), dnsCache: DnsCache);
         UdpRelay.Start(listenEndpoints);
 
         if (capture is not null)
@@ -131,6 +134,24 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
     {
         Interlocked.Increment(ref connectionWatchers);
         return new Watcher(this);
+    }
+
+    /// <summary>
+    /// Forgets the cached DNS answers (fake-address mappings stay: open connections and client caches rely on them)
+    /// and, with <paramref name="includeSystem"/>, the operating system's DNS cache.
+    /// </summary>
+    public (int Cleared, bool SystemCleared, string SystemDetail) ClearDnsCache(bool includeSystem)
+    {
+        var cleared = DnsCache.Clear();
+        var systemCleared = false;
+        var systemDetail = string.Empty;
+        if (includeSystem)
+        {
+            systemCleared = platform.TryFlushSystemDnsCache(out systemDetail);
+        }
+
+        Log.DnsCacheCleared(logger, cleared, includeSystem ? systemDetail : "not requested");
+        return (cleared, systemCleared, systemDetail);
     }
 
     /// <summary>Validates, applies and optionally saves a configuration. Never partially applies.</summary>
@@ -361,5 +382,8 @@ internal sealed partial class ProxynatorEngine(ServiceOptions options, IPlatform
 
         [LoggerMessage(EventId = 3005, Level = LogLevel.Warning, Message = "Running without required privileges ({Reason}); allowed because capture is disabled")]
         public static partial void UnprivilegedWithoutCapture(ILogger logger, string reason);
+
+        [LoggerMessage(EventId = 3006, Level = LogLevel.Information, Message = "Cleared the DNS cache: {Count} answer(s); system cache: {System}")]
+        public static partial void DnsCacheCleared(ILogger logger, int count, string system);
     }
 }

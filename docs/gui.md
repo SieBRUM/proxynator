@@ -12,8 +12,9 @@ See [Installation](installation.md).
 
 ![Overview](images/gui-overview.png)
 
-The service and its capture mode, the relay, the DNS mode, the configuration file, and the active rules in the order
-they are evaluated, each with its resolved route (`proxy via pivot → burp`). If capture **FAILED**, the reason is shown
+The service and its capture mode, the relay, the DNS mode, the DNS cache (with **Clear DNS cache**), the
+configuration file, and the active rules in the order they are evaluated, each with its resolved route
+(`proxy via pivot → burp`). If capture **FAILED**, the reason is shown
 here and on **Diagnostics**; nothing is redirected in that state.
 
 ## Connections
@@ -71,6 +72,9 @@ previous ([guide](guides/chains.md)).
   DNS server** sends the other lookups for those names (SRV, TXT: domain controller discovery) to a DNS server through
   a proxy, and **Also resolve names with this server** resolves the names there too, for proxies that can't
   ([C2 guide](guides/c2-socks.md)).
+- **DNS cache**: how long Proxynator reuses the DNS answers it looked up itself (seconds; `0` = off), or **Keep
+  answers until cleared**. **Clear DNS cache now** empties it on the running service at once
+  ([details](configuration.md#clearing-the-dns-cache)).
 - **QUIC**, sniff and connect timeouts.
 
 Settings the GUI has no field for are kept as they are; edit them on the **JSON** page.

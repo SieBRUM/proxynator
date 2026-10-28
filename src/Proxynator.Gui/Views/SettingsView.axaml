@@ -72,6 +72,34 @@
         </Border>
 
         <Border Classes="card">
+          <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+            <TextBlock Classes="h2" Grid.ColumnSpan="2" Text="DNS cache" />
+            <TextBlock Grid.Row="1" Classes="label" Text="Keep answers (seconds)" />
+            <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <TextBox Text="{Binding DnsCacheSeconds}" Width="120" IsEnabled="{Binding !DnsCacheUntilCleared}" />
+                <CheckBox Content="Keep answers until cleared" IsChecked="{Binding DnsCacheUntilCleared}" />
+              </StackPanel>
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                         Text="How long Proxynator reuses the DNS answers it looked up itself: lookups through the remote DNS server (SRV, TXT, resolveNames) and its own lookups for direct connections and proxy hostnames. 0 turns caching off. Kept answers last until you clear them or the service stops." />
+            </StackPanel>
+            <TextBlock Grid.Row="2" Classes="label" Text="Clear" />
+            <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button Content="Clear DNS cache now" Command="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).DnsCache.ClearCommand}" />
+                <CheckBox Content="Also the system's DNS cache" IsChecked="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).DnsCache.IncludeSystem}" />
+              </StackPanel>
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                         Text="Takes effect at once on the running service; nothing to apply. Fake addresses of remote DNS are kept: open connections use them." />
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                         Classes.error="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).DnsCache.IsError}"
+                         Text="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).DnsCache.Message}"
+                         IsVisible="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).DnsCache.Message, Converter={x:Static conv:Display.NotEmpty}}" />
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <Border Classes="card">
           <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8">
             <TextBlock Classes="h2" Grid.ColumnSpan="2" Text="Traffic" />
             <TextBlock Grid.Row="1" Classes="label" Text="QUIC" />

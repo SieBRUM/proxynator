@@ -4,13 +4,14 @@
 [Installation](installation.md) for who may use it).
 
 ```
-proxynator status                       # service, capture mode and state, relay, DNS, active rules
+proxynator status                       # service, capture mode and state, relay, DNS and its cache, active rules
 proxynator doctor                       # privileges, driver/eBPF/native parts, capture, relay, DNS, proxy reachability
 proxynator config validate <file>       # check a file without applying it (works without the service)
 proxynator config load <file>           # validate and apply atomically, and save it; --no-save to not save it
 proxynator config show                  # print the active configuration
 proxynator rules list                   # rules in evaluation order with their resolved routes
 proxynator connections [--follow]       # relayed connections: process, destination, rule, route, bytes
+proxynator dns clear-cache [--system]   # forget cached DNS answers (--system: also the OS's DNS cache)
 proxynator run [--detach] -- <program> [args...]   # hooking modes: start a program with the hook
 proxynator attach <pid>                 # injection mode (Windows): hook a running program
 ```

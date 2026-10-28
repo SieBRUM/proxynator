@@ -104,4 +104,21 @@ public class ModelTests
         Assert.Empty(problems);
         Assert.Equal(original.Dns.RemoteServer, settings.Dns.RemoteServer);
     }
+
+    [Theory]
+    [InlineData(60, "60", false)]
+    [InlineData(0, "0", false)]
+    [InlineData(DnsSettings.CacheUntilCleared, "60", true)]
+    public void The_dns_cache_time_round_trips(int seconds, string text, bool untilCleared)
+    {
+        var original = new ProxynatorSettings { Dns = new DnsSettings { CacheSeconds = seconds } };
+        List<ConfigError> problems = [];
+
+        var item = SettingsItem.From(original);
+        var settings = item.ToSettings(original, problems);
+
+        Assert.Equal((text, untilCleared), (item.DnsCacheSeconds, item.DnsCacheUntilCleared));
+        Assert.Empty(problems);
+        Assert.Equal(seconds, settings.Dns.CacheSeconds);
+    }
 }

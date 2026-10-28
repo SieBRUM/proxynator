@@ -31,6 +31,18 @@ internal sealed class TestPlatformModule : IPlatformModule, IPrivilegeChecker, I
 
     public IEnumerable<DiagnosticResult> RunDiagnostics() => [new DiagnosticResult("Test platform", DiagnosticStatus.Ok, "fine")];
 
+    /// <summary>Whether clearing the system DNS cache works.</summary>
+    public bool SystemDnsCacheClears { get; init; } = true;
+
+    public int SystemDnsCacheFlushes { get; private set; }
+
+    public bool TryFlushSystemDnsCache(out string detail)
+    {
+        SystemDnsCacheFlushes++;
+        detail = SystemDnsCacheClears ? "test: system cache cleared" : "test: no system cache";
+        return SystemDnsCacheClears;
+    }
+
     public PrivilegeCheckResult Check() => new(Privileged, Privileged ? "test: privileged" : "test: not privileged");
 
     public ProcessInfo? GetProcessInfo(int processId) => Processes.GetValueOrDefault(processId);

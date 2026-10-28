@@ -23,11 +23,12 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         this.launcher = launcher ?? new ServiceLauncher();
         State = new ServiceState(service);
         Workspace = new ConfigWorkspace(service);
-        Overview = new OverviewViewModel(service, State);
+        DnsCache = new DnsCacheViewModel(service);
+        Overview = new OverviewViewModel(service, State, DnsCache);
         Connections = new ConnectionsViewModel(service);
         Rules = new RulesViewModel(Workspace);
         Proxies = new ProxiesViewModel(Workspace);
-        Settings = new SettingsViewModel(Workspace);
+        Settings = new SettingsViewModel(Workspace, DnsCache);
         Json = new JsonViewModel(Workspace, dialogs);
         Launch = new LaunchViewModel(service, State, dialogs);
         Diagnostics = new DiagnosticsViewModel(service);
@@ -40,6 +41,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     public ConfigWorkspace Workspace { get; }
 
     public OverviewViewModel Overview { get; }
+
+    public DnsCacheViewModel DnsCache { get; }
 
     public ConnectionsViewModel Connections { get; }
 

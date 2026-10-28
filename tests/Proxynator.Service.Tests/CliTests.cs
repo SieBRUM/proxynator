@@ -55,6 +55,40 @@ public class CliTests
     }
 
     [Fact]
+    public async Task Status_shows_the_dns_cache_and_clear_cache_empties_it()
+    {
+        var platform = new TestPlatformModule();
+        await using var service = await TestService.StartAsync(platform, initialConfigJson: """{ "version": 1, "settings": { "dns": { "cacheSeconds": -1 } } }""");
+        service.Engine.DnsCache.Set("a", "answer", null);
+        service.Engine.DnsCache.Set("b", "answer", null);
+        var (commands, output, error) = Create(service.Endpoint);
+
+        Assert.Equal(ExitCodes.Success, await commands.StatusAsync(TestTimeout.Token()));
+        Assert.Contains("DNS cache:    2 answer(s), kept until cleared", output.ToString(), StringComparison.Ordinal);
+
+        Assert.Equal(ExitCodes.Success, await commands.ClearDnsCacheAsync(includeSystem: false, TestTimeout.Token()));
+        Assert.Contains("Cleared 2 cached DNS answer(s)", output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(0, service.Engine.DnsCache.Count);
+        Assert.Equal(0, platform.SystemDnsCacheFlushes); // only with --system
+
+        Assert.Equal(ExitCodes.Success, await commands.ClearDnsCacheAsync(includeSystem: true, TestTimeout.Token()));
+        Assert.Contains("Cleared 0 cached DNS answer(s)", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("test: system cache cleared", output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(1, platform.SystemDnsCacheFlushes);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task Clear_cache_fails_when_the_system_cache_cannot_be_cleared()
+    {
+        await using var service = await TestService.StartAsync(new TestPlatformModule { SystemDnsCacheClears = false });
+        var (commands, _, error) = Create(service.Endpoint);
+
+        Assert.Equal(ExitCodes.Failure, await commands.ClearDnsCacheAsync(includeSystem: true, TestTimeout.Token()));
+        Assert.Contains("test: no system cache", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Validate_works_without_the_service()
     {
         var (commands, output, _) = Create("unused");

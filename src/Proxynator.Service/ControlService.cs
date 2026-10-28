@@ -47,6 +47,8 @@ internal sealed class ControlService(ProxynatorEngine engine) : Control.ControlB
         response.UdpRelayEndpoints.AddRange(engine.UdpRelay?.LocalEndpoints.Select(e => e.ToString()) ?? []);
         response.DnsMode = active.Settings.Dns.Mode.ToString().ToLowerInvariant();
         response.FakeIpCount = engine.FakeIps.Count;
+        response.DnsCacheEntries = engine.DnsCache.Count;
+        response.DnsCacheSeconds = active.Settings.Dns.CacheSeconds;
         return Task.FromResult(response);
     }
 
@@ -148,6 +150,17 @@ internal sealed class ControlService(ProxynatorEngine engine) : Control.ControlB
             },
         }));
         return response;
+    }
+
+    public override Task<ClearDnsCacheResponse> ClearDnsCache(ClearDnsCacheRequest request, ServerCallContext context)
+    {
+        var (cleared, systemCleared, systemDetail) = engine.ClearDnsCache(request.IncludeSystem);
+        return Task.FromResult(new ClearDnsCacheResponse
+        {
+            ClearedEntries = cleared,
+            SystemCacheCleared = systemCleared,
+            SystemCacheDetail = systemDetail,
+        });
     }
 
     internal static string DescribeMatch(RuleMatch match)

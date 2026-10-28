@@ -36,7 +36,8 @@ The C2's SOCKS server listens on `127.0.0.1:1080` (on the teamserver, reach it t
    `127.0.0.1`, **Port** `1080`.
 2. **Settings** → **DNS mode** `remote`, **Remote domains** `*corp.local`, tick **Remote DNS server**: **Server
    address** `10.0.0.10`, **Via** `c2`. Tick **Also resolve names with this server** if the implant's host can't
-   resolve internal names (see below). Set **Proxy connect timeout (ms)** to `60000` for a sleeping implant.
+   resolve internal names (see below). Set **Proxy connect timeout (ms)** to `60000` for a sleeping implant, and tick **Keep answers until cleared** under
+   **DNS cache**, so each name costs one trip through the implant per session.
 3. **Rules** → **Add**: **Hosts** `*corp.local`, **Action** `proxy`, **Via** `c2`. **Add** another with **Addresses**
    `10.0.0.0/8` for hosts you use by IP.
 4. **Apply and save**, then check **Diagnostics**.
@@ -52,7 +53,8 @@ The C2's SOCKS server listens on `127.0.0.1:1080` (on the teamserver, reach it t
     "dns": {
       "mode": "remote",
       "remoteDomains": ["*corp.local"],
-      "remoteServer": { "address": "10.0.0.10", "via": "c2", "resolveNames": true }
+      "remoteServer": { "address": "10.0.0.10", "via": "c2", "resolveNames": true },
+      "cacheSeconds": -1
     },
     "relay": { "connectTimeoutMs": 60000 }
   },
@@ -69,6 +71,9 @@ The C2's SOCKS server listens on `127.0.0.1:1080` (on the teamserver, reach it t
 With `capture.mode` left at `auto`, this covers every program on the machine. To limit it to some tools, add
 `"processes"` to the rules, or use a [hooking mode](hooking.md) and start the tools through Proxynator.
 
+`"cacheSeconds": -1` keeps the DNS answers that came through the tunnel until you clear them
+(**Clear DNS cache** in the GUI, `proxynator dns clear-cache`), instead of asking again every minute.
+
 ## Common problems
 
 | Symptom | Cause | Fix |
@@ -81,6 +86,7 @@ With `capture.mode` left at `auto`, this covers every program on the machine. To
 | A tool's own DNS option (`nxc --dns-server`, `bloodhound-python -ns`) times out | It sends UDP DNS straight to the DC, and the SOCKS server has no UDP. | Use its TCP option (`--dns-tcp`), which goes through the tunnel like any TCP connection. |
 | Kerberos is slow or fails | UDP 88 can't cross the tunnel, so it is blocked (never sent direct). | Most clients retry over TCP (impacket uses TCP). Windows: force TCP with the `MaxPacketSize=1` Kerberos registry setting. Mind clock skew. |
 | Connections time out | The SOCKS server answers only when the implant checks in. | Interactive mode / sleep 0 while tunnelling; raise `relay.connectTimeoutMs`. |
+| Every connection waits for a DNS lookup through the tunnel | Answers are cached for only 60 seconds by default, and each lookup costs an implant round trip. | Raise `settings.dns.cacheSeconds`, or `-1` to keep answers for the session; clear them when something changes ([details](../configuration.md#clearing-the-dns-cache)). |
 | `nslookup dc01.corp.local` returns `198.18.x.x` | That's the placeholder address; it's correct. | Nothing; connections to it go through the C2 with the real name. |
 
 ### The pivot can't resolve internal names
@@ -91,7 +97,7 @@ workstation outside the domain or a container often can't resolve `corp.local`, 
 
 `"resolveNames": true` on the `remoteServer` fixes it. Proxynator asks that DNS server (a domain controller) for the
 address, as DNS over TCP through the tunnel, and gives the SOCKS server the address instead of the name. Answers are
-kept for 60 seconds, so a burst of connections means one lookup. If the DNS server doesn't know the name, the
+kept for `cacheSeconds` (default 60 seconds), so a burst of connections means one lookup. If the DNS server doesn't know the name, the
 connection fails. It also makes plain SOCKS4 servers usable with internal names.
 
 ### What about UDP?

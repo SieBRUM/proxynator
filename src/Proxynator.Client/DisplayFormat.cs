@@ -28,4 +28,12 @@ public static class DisplayFormat
         : duration.TotalMinutes >= 1
             ? string.Create(CultureInfo.InvariantCulture, $"{duration.Minutes}m{duration.Seconds:00}s")
             : string.Create(CultureInfo.InvariantCulture, $"{Math.Max(0, duration.Seconds)}s");
+
+    /// <summary>How long DNS answers are kept (<c>settings.dns.cacheSeconds</c>), e.g. <c>kept 60 s</c>.</summary>
+    public static string DnsCacheLifetime(int cacheSeconds) => cacheSeconds switch
+    {
+        < 0 => "kept until cleared",
+        0 => "caching off",
+        _ => string.Create(CultureInfo.InvariantCulture, $"kept {cacheSeconds} s"),
+    };
 }

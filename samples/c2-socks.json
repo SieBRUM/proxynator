@@ -13,7 +13,10 @@
         // The implant's host may not use the domain's DNS: resolve names with the DC instead and give the C2 the
         // address. Also needed for SOCKS servers that only speak plain SOCKS4.
         "resolveNames": true
-      }
+      },
+      // Every lookup through the C2 costs an implant round trip: keep the answers until they are cleared
+      // (proxynator dns clear-cache, or Clear DNS cache in the GUI).
+      "cacheSeconds": -1
     },
     // C2 SOCKS answers only when the implant checks in: allow for its sleep (interactive mode/sleep 0 is better).
     "relay": { "connectTimeoutMs": 60000 }

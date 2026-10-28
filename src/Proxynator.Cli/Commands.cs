@@ -24,10 +24,23 @@ internal sealed class Commands(string endpoint, TextWriter output, TextWriter er
 
         output.WriteLine($"Relay:        TCP {string.Join(", ", status.RelayEndpoints)}; UDP {string.Join(", ", status.UdpRelayEndpoints)}");
         output.WriteLine($"DNS mode:     {status.DnsMode}{(status.DnsMode == "remote" ? $" ({status.FakeIpCount} name(s) on fake addresses)" : string.Empty)}");
+        output.WriteLine($"DNS cache:    {status.DnsCacheEntries} answer(s), {DisplayFormat.DnsCacheLifetime(status.DnsCacheSeconds)}");
         output.WriteLine($"Config:       {status.ConfigPath} ({status.RuleCount} active rule(s))");
         output.WriteLine($"Connections:  {status.ActiveConnections} active");
         output.WriteLine($"Privileged:   {(status.Privileged ? "yes" : "no")}");
         return status.Capture.State == CaptureState.Failed ? ExitCodes.Failure : ExitCodes.Success;
+    }).ConfigureAwait(false);
+
+    public async Task<int> ClearDnsCacheAsync(bool includeSystem, CancellationToken cancellationToken) => await CallAsync(async client =>
+    {
+        var response = await client.ClearDnsCacheAsync(new ClearDnsCacheRequest { IncludeSystem = includeSystem }, cancellationToken: cancellationToken);
+        output.WriteLine($"Cleared {response.ClearedEntries} cached DNS answer(s). New connections look names up again.");
+        if (includeSystem)
+        {
+            (response.SystemCacheCleared ? output : error).WriteLine(response.SystemCacheDetail);
+        }
+
+        return includeSystem && !response.SystemCacheCleared ? ExitCodes.Failure : ExitCodes.Success;
     }).ConfigureAwait(false);
 
     public async Task<int> ValidateConfigAsync(string path, CancellationToken cancellationToken)

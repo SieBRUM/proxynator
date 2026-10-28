@@ -13,10 +13,11 @@ internal sealed partial class OverviewViewModel : PageViewModel
 {
     private readonly ServiceConnection service;
 
-    public OverviewViewModel(ServiceConnection service, ServiceState state)
+    public OverviewViewModel(ServiceConnection service, ServiceState state, DnsCacheViewModel dnsCache)
     {
         this.service = service;
         State = state;
+        DnsCache = dnsCache;
         state.PropertyChanged += OnStateChanged;
     }
 
@@ -25,6 +26,8 @@ internal sealed partial class OverviewViewModel : PageViewModel
     public override string Icon => "OverviewIcon";
 
     public ServiceState State { get; }
+
+    public DnsCacheViewModel DnsCache { get; }
 
     public ObservableCollection<ActiveRule> Rules { get; } = [];
 
@@ -45,6 +48,10 @@ internal sealed partial class OverviewViewModel : PageViewModel
 
     public string Dns => State.Status is { } s
         ? s.DnsMode == "remote" ? $"remote ({s.FakeIpCount} name(s) on fake addresses)" : s.DnsMode
+        : "—";
+
+    public string DnsCacheStatus => State.Status is { } s
+        ? $"{s.DnsCacheEntries} answer(s), {DisplayFormat.DnsCacheLifetime(s.DnsCacheSeconds)}"
         : "—";
 
     public string Config => State.Status is { } s ? $"{s.ConfigPath} ({s.RuleCount} active rule(s))" : "—";
@@ -95,7 +102,7 @@ internal sealed partial class OverviewViewModel : PageViewModel
             return;
         }
 
-        foreach (var name in new[] { nameof(Service), nameof(Capture), nameof(CaptureDetail), nameof(Relay), nameof(Dns), nameof(Config), nameof(Connections), nameof(Privileged) })
+        foreach (var name in new[] { nameof(Service), nameof(Capture), nameof(CaptureDetail), nameof(Relay), nameof(Dns), nameof(DnsCacheStatus), nameof(Config), nameof(Connections), nameof(Privileged) })
         {
             OnPropertyChanged(name);
         }
