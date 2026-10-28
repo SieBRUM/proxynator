@@ -26,4 +26,16 @@ public sealed record DnsSettings
 
     /// <summary>How long to wait for the client's first bytes when sniffing a hostname.</summary>
     public int SniffTimeoutMs { get; set; } = 250;
+
+    /// <summary>The <see cref="CacheSeconds"/> value that keeps answers until the cache is cleared or the service stops.</summary>
+    public const int CacheUntilCleared = -1;
+
+    /// <summary>The longest <see cref="CacheSeconds"/> value other than <see cref="CacheUntilCleared"/> (one week).</summary>
+    public const int MaxCacheSeconds = 604_800;
+
+    /// <summary>
+    /// How long Proxynator reuses the DNS answers it resolved itself (see <c>NameResolution.DnsCache</c>), in seconds.
+    /// 0 turns caching off; <see cref="CacheUntilCleared"/> keeps answers until the cache is cleared or the service stops.
+    /// </summary>
+    public int CacheSeconds { get; set; } = 60;
 }

@@ -27,6 +27,25 @@ public class ControlApiTests
         Assert.Equal(0, status.RuleCount);
         Assert.Single(status.RelayEndpoints);
         Assert.Equal(Environment.ProcessId, status.ProcessId);
+        Assert.Equal(0, status.DnsCacheEntries);
+        Assert.Equal(60, status.DnsCacheSeconds);
+    }
+
+    [Fact]
+    public async Task Clearing_the_dns_cache_forgets_the_relays_answers_but_keeps_fake_addresses()
+    {
+        var platform = new TestPlatformModule();
+        await using var service = await TestService.StartAsync(platform);
+        var fake = service.Engine.FakeIps.GetOrAllocate("dc01.corp.local");
+        service.Engine.DnsCache.Set("remote-address x DC01.CORP.LOCAL", System.Net.IPAddress.Loopback, null);
+
+        var response = await service.Client.ClearDnsCacheAsync(new ClearDnsCacheRequest { IncludeSystem = true }, cancellationToken: TestTimeout.Token());
+
+        Assert.Equal(1, response.ClearedEntries);
+        Assert.True(response.SystemCacheCleared);
+        Assert.Equal("test: system cache cleared", response.SystemCacheDetail);
+        Assert.Equal(0, service.Engine.DnsCache.Count);
+        Assert.Equal(fake, service.Engine.FakeIps.GetOrAllocate("dc01.corp.local")); // open connections rely on them
     }
 
     [Fact]

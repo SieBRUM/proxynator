@@ -40,6 +40,12 @@ internal sealed partial class SettingsItem : ObservableObject
     public partial string SniffTimeoutMs { get; set; } = "250";
 
     [ObservableProperty]
+    public partial string DnsCacheSeconds { get; set; } = "60";
+
+    [ObservableProperty]
+    public partial bool DnsCacheUntilCleared { get; set; }
+
+    [ObservableProperty]
     public partial bool BlockQuic { get; set; } = true;
 
     [ObservableProperty]
@@ -63,6 +69,8 @@ internal sealed partial class SettingsItem : ObservableObject
             RemoteServerVia = dns.RemoteServer?.Via ?? string.Empty,
             RemoteServerResolveNames = dns.RemoteServer?.ResolveNames ?? false,
             SniffTimeoutMs = dns.SniffTimeoutMs.ToString(CultureInfo.InvariantCulture),
+            DnsCacheUntilCleared = dns.CacheSeconds == DnsSettings.CacheUntilCleared,
+            DnsCacheSeconds = (dns.CacheSeconds == DnsSettings.CacheUntilCleared ? 60 : dns.CacheSeconds).ToString(CultureInfo.InvariantCulture),
             BlockQuic = settings.Udp.BlockQuic,
             ConnectTimeoutMs = settings.Relay.ConnectTimeoutMs.ToString(CultureInfo.InvariantCulture),
         };
@@ -95,14 +103,15 @@ internal sealed partial class SettingsItem : ObservableObject
                 RemoteDomains = ListText.Parse(RemoteDomains),
                 RemoteServer = remoteServer,
                 SniffTimeoutMs = Number(SniffTimeoutMs, "$.settings.dns.sniffTimeoutMs", 250),
+                CacheSeconds = DnsCacheUntilCleared ? DnsSettings.CacheUntilCleared : Number(DnsCacheSeconds, "$.settings.dns.cacheSeconds", 60, NumberStyles.AllowLeadingSign), // -1 works too
             },
             Udp = original.Udp with { BlockQuic = BlockQuic },
             Relay = original.Relay with { ConnectTimeoutMs = Number(ConnectTimeoutMs, "$.settings.relay.connectTimeoutMs", 10_000) },
         };
 
-        int Number(string text, string path, int fallback)
+        int Number(string text, string path, int fallback, NumberStyles styles = NumberStyles.None)
         {
-            if (int.TryParse(text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var value))
+            if (int.TryParse(text.Trim(), styles, CultureInfo.InvariantCulture, out var value))
             {
                 return value;
             }

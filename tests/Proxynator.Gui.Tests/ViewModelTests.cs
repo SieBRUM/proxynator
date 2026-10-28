@@ -250,6 +250,46 @@ public class ViewModelTests
     }
 
     [AvaloniaFact]
+    public async Task The_dns_cache_time_is_edited_and_the_cache_cleared()
+    {
+        await using var gui = await GuiHarness.StartAsync(GuiHarness.SampleConfig);
+        var settings = gui.Workspace.Settings;
+
+        settings.DnsCacheSeconds = "a while";
+        Assert.Contains("settings.dns.cacheSeconds: Enter a whole number.", gui.Workspace.Problems);
+        settings.DnsCacheSeconds = "-5";
+        Assert.Contains(gui.Workspace.Problems, p => p.Contains("cacheSeconds", StringComparison.Ordinal) && p.Contains("-1", StringComparison.Ordinal));
+        settings.DnsCacheSeconds = "300";
+        settings.DnsCacheUntilCleared = true;
+        Assert.True(await gui.Workspace.ApplyAsync(persist: false));
+        Assert.Equal(DnsSettings.CacheUntilCleared, gui.Service.Engine.Configuration.Current.Config.Settings.Dns.CacheSeconds);
+
+        gui.Service.Engine.DnsCache.Set("a", "answer", null);
+        await gui.ViewModel.TickAsync();
+        Assert.Equal("1 answer(s), kept until cleared", gui.ViewModel.Overview.DnsCacheStatus);
+
+        await gui.ViewModel.Settings.DnsCache.ClearCommand.ExecuteAsync(null);
+
+        Assert.StartsWith("Cleared 1 cached answer(s)", gui.ViewModel.DnsCache.Message, StringComparison.Ordinal);
+        Assert.False(gui.ViewModel.DnsCache.IsError);
+        Assert.Equal(0, gui.Service.Engine.DnsCache.Count);
+        Assert.Same(gui.ViewModel.Overview.DnsCache, gui.ViewModel.Settings.DnsCache);
+    }
+
+    [AvaloniaFact]
+    public async Task Clearing_the_system_dns_cache_reports_why_it_failed()
+    {
+        await using var gui = await GuiHarness.StartAsync(platform: new TestPlatformModule { SystemDnsCacheClears = false });
+        var cache = gui.ViewModel.DnsCache;
+
+        cache.IncludeSystem = true;
+        await cache.ClearCommand.ExecuteAsync(null);
+
+        Assert.True(cache.IsError);
+        Assert.EndsWith("test: no system cache", cache.Message, StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
     public async Task Json_round_trips_through_the_working_copy_and_files()
     {
         await using var gui = await GuiHarness.StartAsync(GuiHarness.SampleConfig);

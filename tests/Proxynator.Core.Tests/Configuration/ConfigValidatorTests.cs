@@ -117,6 +117,20 @@ public class ConfigValidatorTests
         Assert.Equal(["$.settings.dns.fakeIpRange", "$.settings.dns.sniffTimeoutMs", "$.settings.relay.connectTimeoutMs"], ErrorPaths(config));
     }
 
+    [Theory]
+    [InlineData(-1, true)] // until cleared
+    [InlineData(0, true)] // off
+    [InlineData(60, true)]
+    [InlineData(604_800, true)]
+    [InlineData(-2, false)]
+    [InlineData(604_801, false)]
+    public void Dns_cache_seconds_are_checked(int seconds, bool valid)
+    {
+        var config = Configs.Minimal() with { Settings = new ProxynatorSettings { Dns = new DnsSettings { CacheSeconds = seconds } } };
+
+        Assert.Equal(valid ? [] : ["$.settings.dns.cacheSeconds"], ErrorPaths(config));
+    }
+
     [Fact]
     public void Store_keeps_old_configuration_when_new_one_is_invalid()
     {

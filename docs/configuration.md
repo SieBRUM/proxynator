@@ -23,7 +23,8 @@ A complete example:
     "dns": {
       "mode": "remote",
       "remoteDomains": ["*corp.local"],
-      "remoteServer": { "address": "10.0.0.10", "port": 53, "via": "pivot", "resolveNames": false }
+      "remoteServer": { "address": "10.0.0.10", "port": 53, "via": "pivot", "resolveNames": false },
+      "cacheSeconds": 60
     },
     "udp": { "blockQuic": true },
     "relay": { "connectTimeoutMs": 10000 }
@@ -68,9 +69,22 @@ The configuration format version, currently `1`. Older versions are upgraded aut
 | `remoteServer.via` | | The proxy or chain that reaches it. |
 | `remoteServer.resolveNames` | `false` | Also resolve `remoteDomains` names there and give proxies the address instead of the name: for proxies that can't resolve internal names, and plain SOCKS4 ([details](guides/c2-socks.md#the-pivot-cant-resolve-internal-names)). |
 | `sniffTimeoutMs` | `250` | How long the relay waits for a TLS/HTTP request to read the name from (0-10000). |
+| `cacheSeconds` | `60` | How long Proxynator reuses the DNS answers it looked up itself: answers from `remoteServer` (SRV, TXT, `resolveNames` addresses) and its own lookups for direct connections and proxy hostnames. `0` turns caching off, `-1` keeps answers until you [clear the cache](#clearing-the-dns-cache) or the service stops, otherwise up to `604800` (a week). Changes apply at once, also to answers already cached. |
 
 Names without a dot, `*.localhost`, reverse lookups and the proxies' own hostnames are never answered with
 placeholders.
+
+### Clearing the DNS cache
+
+- **GUI:** **Clear DNS cache** on the **Overview** page, or **Clear DNS cache now** on **Settings**. Tick **also the
+  system's** to clear the operating system's cache too.
+- **CLI:** `proxynator dns clear-cache` (add `--system` for the operating system's cache).
+
+It takes effect at once, without applying a configuration: new connections look names up again. Failed lookups
+are never cached, but answers are: when the target network changes (a host moves, a DNS record is fixed), clear the
+cache, or use a short `cacheSeconds`. Placeholder addresses of remote DNS are kept, because open connections and
+programs' own caches still use them. The operating system's cache is the Windows DNS client cache, or
+systemd-resolved on Linux (`resolvectl flush-caches`).
 
 ## `settings.udp`
 

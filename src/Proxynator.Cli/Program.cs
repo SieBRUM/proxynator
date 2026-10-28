@@ -36,6 +36,11 @@ var followOption = new Option<bool>("--follow", "-f") { Description = "Keep runn
 var connections = new Command("connections", "List connections currently handled by the relay.") { followOption };
 connections.SetAction((parseResult, cancellationToken) => CreateCommands(parseResult).ConnectionsAsync(parseResult.GetValue(followOption), cancellationToken));
 
+var systemOption = new Option<bool>("--system") { Description = "Also clear the operating system's DNS cache (Windows DNS client, systemd-resolved)." };
+var clearCache = new Command("clear-cache", "Forget the DNS answers Proxynator cached (settings.dns.cacheSeconds), so names are looked up again.") { systemOption };
+clearCache.SetAction((parseResult, cancellationToken) => CreateCommands(parseResult).ClearDnsCacheAsync(parseResult.GetValue(systemOption), cancellationToken));
+var dns = new Command("dns", "Manage Proxynator's DNS cache.") { clearCache };
+
 var doctor = new Command("doctor", "Check privileges, driver files, capture, relay and proxy reachability.");
 doctor.SetAction((parseResult, cancellationToken) => CreateCommands(parseResult).DoctorAsync(cancellationToken));
 
@@ -52,7 +57,7 @@ attach.SetAction(parseResult => new InjectionCommands(parseResult.GetValue(endpo
 
 var root = new RootCommand("proxynator: control the Proxynator service (proxynatord).")
 {
-    endpointOption, status, config, rules, connections, doctor, run, attach,
+    endpointOption, status, config, rules, connections, dns, doctor, run, attach,
 };
 
 var parsed = root.Parse(args);

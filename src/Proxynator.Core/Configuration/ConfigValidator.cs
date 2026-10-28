@@ -42,6 +42,11 @@ public static class ConfigValidator
             errors.Add(new("$.settings.dns.sniffTimeoutMs", "Must be between 0 and 10000."));
         }
 
+        if (settings.Dns.CacheSeconds is < DnsSettings.CacheUntilCleared or > DnsSettings.MaxCacheSeconds)
+        {
+            errors.Add(new("$.settings.dns.cacheSeconds", $"Must be between 0 and {DnsSettings.MaxCacheSeconds} seconds, or -1 to keep answers until the cache is cleared."));
+        }
+
         if (settings.Relay.ConnectTimeoutMs is < 100 or > 300_000)
         {
             errors.Add(new("$.settings.relay.connectTimeoutMs", "Must be between 100 and 300000."));

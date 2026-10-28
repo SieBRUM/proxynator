@@ -43,6 +43,7 @@ public sealed class RelayServer : IAsyncDisposable
     /// <param name="connector">Opens upstream TCP connections; defaults to a <see cref="TcpConnector"/> using <paramref name="resolver"/>.</param>
     /// <param name="fakeIps">The fake-IP pool, when fake-IP DNS can be active; connections to its addresses are mapped back to hostnames.</param>
     /// <param name="resolver">Resolves hostnames for direct connections; defaults to the system resolver.</param>
+    /// <param name="dnsCache">Keeps the remote DNS server's answers; shared with the rest of the service.</param>
     public RelayServer(
         ConfigurationStore configuration,
         IOriginalDestinationTable destinations,
@@ -51,7 +52,8 @@ public sealed class RelayServer : IAsyncDisposable
         ILogger<RelayServer> logger,
         ITcpConnector? connector = null,
         FakeIpPool? fakeIps = null,
-        IHostResolver? resolver = null)
+        IHostResolver? resolver = null,
+        DnsCache? dnsCache = null)
     {
         this.configuration = configuration;
         this.destinations = destinations;
@@ -61,7 +63,7 @@ public sealed class RelayServer : IAsyncDisposable
         this.fakeIps = fakeIps;
         this.connector = connector ?? new TcpConnector(resolver: resolver);
         dialer = new ProxyRouteDialer(this.connector);
-        remoteDns = new RemoteDnsClient(dialer, logger);
+        remoteDns = new RemoteDnsClient(dialer, logger, dnsCache);
     }
 
     /// <summary>The endpoints the relay is listening on (with actual ports when port 0 was requested).</summary>

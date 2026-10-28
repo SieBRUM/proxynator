@@ -171,11 +171,19 @@ remote mode is on — the system resolver would return Proxynator's own fake ans
 responder does not answer (SRV, TXT, MX, ...: domain controller discovery) go to that DNS server as DNS over TCP
 through the `via` route (`RemoteDnsClient`, used by the UDP relay's DNS sessions and by `DnsForwarder`). Failure →
 SERVFAIL, never the local DNS. A/AAAA stay fake. With `remoteServer.resolveNames`, the TCP relay also resolves
-remote-domain names there (`RemoteDnsClient.ResolveAsync`: an A query through the route, cached 60 s) and gives the
+remote-domain names there (`RemoteDnsClient.ResolveAsync`: an A query through the route) and gives the
 proxy the address instead of the name: for pivots that cannot resolve internal names and for plain SOCKS4. Unknown
 name → the connection fails (closed). Without it, a name-only target whose route ends in plain `socks4` is refused
 with an explanation (never resolved locally: that would give the proxy a fake address or fail), and `doctor` warns
 about remote DNS + SOCKS4 routes. These C2/pivot situations are reproduced in `C2SocksScenarioTests` (see ADR 0007).
+
+DNS cache (`NameResolution/DnsCache`, one instance per service, shared by both relays' `RemoteDnsClient`s and
+`ModeAwareResolver`): `remoteServer` answers (NOERROR/NXDOMAIN responses, returned with the new query's ID),
+`resolveNames` addresses and the service's own lookups. `settings.dns.cacheSeconds` (default 60; 0 = off; -1 = until
+cleared) is applied when an entry is *read*, so config changes affect cached entries. Failures and empty address
+answers are never cached. `ClearDnsCache` (gRPC; `proxynator dns clear-cache [--system]`; GUI Overview and Settings)
+empties it and optionally the OS cache (`IPlatformModule.TryFlushSystemDnsCache`: `DnsFlushResolverCache` on
+Windows, `resolvectl flush-caches` on Linux). The `FakeIpPool` is never cleared: open connections rely on it.
 
 Gotcha: on Windows most DNS queries are sent by the `Dnscache` service (`svchost.exe`), not by the app, so per-process attribution of DNS packets is impossible in `windivert` mode. `remote` mode in `windivert` is therefore applied system-wide for the listed domains (relay sends non-proxied fake-IP connections direct after real resolution). That includes the service's own process and in-process tests: resolve real addresses before turning remote mode on. In `injection`, `preload` and `ebpf` modes it is per-process (resolver hooks, or the eBPF DNS redirect of candidate processes). Apps using their own DoH just look like ordinary TCP/443 flows and are handled by the rules.
 

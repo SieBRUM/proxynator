@@ -66,6 +66,13 @@
               "maximum": 10000,
               "default": 250
             },
+            "cacheSeconds": {
+              "description": "How long Proxynator reuses DNS answers it resolved itself, in seconds. 0 turns caching off; -1 keeps answers until the cache is cleared (proxynator dns clear-cache, GUI) or the service stops.",
+              "type": "integer",
+              "minimum": -1,
+              "maximum": 604800,
+              "default": 60
+            },
             "remoteDomains": {
               "type": "array",
               "items": {

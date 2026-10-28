@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging;
 using Proxynator.Core.Configuration;
@@ -15,6 +16,8 @@ public sealed class LinuxPlatformModule : IPlatformModule, IDisposable
 {
     private readonly LinuxProcessInfoProvider processInfo = new();
     private readonly LinuxPrivilegeChecker privilegeChecker = new();
+
+    private static readonly string[] ResolvectlPaths = ["/usr/bin/resolvectl", "/bin/resolvectl"];
 
     /// <inheritdoc />
     public string Name => "Linux";
@@ -42,6 +45,44 @@ public sealed class LinuxPlatformModule : IPlatformModule, IDisposable
         CaptureMode.Nftables => throw new NotSupportedException("The nftables capture mode is not implemented; use \"ebpf\" (default) or \"preload\"."),
         _ => throw new NotSupportedException($"Capture mode '{mode}' is not available on Linux. Use \"ebpf\" or \"preload\"."),
     };
+
+    /// <inheritdoc />
+    public bool TryFlushSystemDnsCache(out string detail)
+    {
+        // systemd-resolved is the usual system cache (Ubuntu); without it, most programs don't cache at all.
+        if (ResolvectlPaths.FirstOrDefault(File.Exists) is not { } resolvectl)
+        {
+            detail = "No systemd-resolved (resolvectl) on this machine, so there is no system DNS cache to clear.";
+            return false;
+        }
+
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo(resolvectl, ["flush-caches"])
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            }) ?? throw new InvalidOperationException("resolvectl did not start.");
+            if (!process.WaitForExit(5000))
+            {
+                process.Kill();
+                detail = "resolvectl flush-caches did not finish within 5 seconds.";
+                return false;
+            }
+
+            var error = process.StandardError.ReadToEnd().Trim();
+            detail = process.ExitCode == 0
+                ? "Cleared the systemd-resolved cache."
+                : $"resolvectl flush-caches failed (exit code {process.ExitCode}): {error}";
+            return process.ExitCode == 0;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            detail = $"Cannot run resolvectl: {ex.Message}";
+            return false;
+        }
+    }
 
     /// <inheritdoc />
     public IEnumerable<DiagnosticResult> RunDiagnostics()

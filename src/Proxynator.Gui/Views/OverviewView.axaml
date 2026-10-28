@@ -9,7 +9,7 @@
       <TextBlock Classes="h1" Text="Overview" />
 
       <Border Classes="card">
-        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
+        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
           <TextBlock Classes="label" Text="Service" />
           <TextBlock Grid.Column="1" Text="{Binding Service}" TextWrapping="Wrap" />
           <TextBlock Grid.Row="1" Classes="label" Text="Capture" />
@@ -21,12 +21,22 @@
           <TextBlock Grid.Row="3" Grid.Column="1" Classes="mono" Text="{Binding Relay}" TextWrapping="Wrap" />
           <TextBlock Grid.Row="4" Classes="label" Text="DNS mode" />
           <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Dns}" />
-          <TextBlock Grid.Row="5" Classes="label" Text="Configuration" />
-          <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Config}" TextWrapping="Wrap" />
-          <TextBlock Grid.Row="6" Classes="label" Text="Connections" />
-          <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Connections}" />
-          <TextBlock Grid.Row="7" Classes="label" Text="Privileged" />
-          <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Privileged}" />
+          <TextBlock Grid.Row="5" Classes="label" Text="DNS cache" />
+          <StackPanel Grid.Row="5" Grid.Column="1" Spacing="2">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <TextBlock Text="{Binding DnsCacheStatus}" VerticalAlignment="Center" />
+              <Button Content="Clear DNS cache" Command="{Binding DnsCache.ClearCommand}" Padding="8,2" />
+              <CheckBox Content="also the system's" IsChecked="{Binding DnsCache.IncludeSystem}" />
+            </StackPanel>
+            <TextBlock Classes="muted" Classes.error="{Binding DnsCache.IsError}" Text="{Binding DnsCache.Message}" TextWrapping="Wrap"
+                       IsVisible="{Binding DnsCache.Message, Converter={x:Static conv:Display.NotEmpty}}" />
+          </StackPanel>
+          <TextBlock Grid.Row="6" Classes="label" Text="Configuration" />
+          <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Config}" TextWrapping="Wrap" />
+          <TextBlock Grid.Row="7" Classes="label" Text="Connections" />
+          <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Connections}" />
+          <TextBlock Grid.Row="8" Classes="label" Text="Privileged" />
+          <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding Privileged}" />
         </Grid>
       </Border>
 

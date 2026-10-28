@@ -44,6 +44,22 @@ public sealed class WindowsPlatformModule : IPlatformModule, IDisposable
     };
 
     /// <inheritdoc />
+    public bool TryFlushSystemDnsCache(out string detail)
+    {
+        try
+        {
+            var flushed = DnsApi.FlushResolverCache();
+            detail = flushed ? "Cleared the Windows DNS client cache." : "Windows did not clear its DNS client cache.";
+            return flushed;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            detail = $"The Windows DNS client cache cannot be cleared: {ex.Message}";
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
     public IEnumerable<DiagnosticResult> RunDiagnostics()
     {
         var privileges = privilegeChecker.Check();

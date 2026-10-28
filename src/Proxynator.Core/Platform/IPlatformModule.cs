@@ -28,4 +28,14 @@ public interface IPlatformModule
 
     /// <summary>Platform-specific checks for <c>proxynator doctor</c>.</summary>
     IEnumerable<DiagnosticResult> RunDiagnostics();
+
+    /// <summary>
+    /// Clears the operating system's DNS cache (when the user clears Proxynator's), so programs look names up again.
+    /// <paramref name="detail"/> says what was done or why nothing was.
+    /// </summary>
+    bool TryFlushSystemDnsCache(out string detail)
+    {
+        detail = "This platform has no system DNS cache Proxynator can clear.";
+        return false;
+    }
 }

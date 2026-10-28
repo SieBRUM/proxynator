@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -15,17 +14,19 @@ namespace Proxynator.Core.NameResolution;
 /// route. This is how the SRV lookups of Active Directory tools (<c>_ldap._tcp.dc._msdcs.corp.local</c>,
 /// <c>_kerberos._tcp.corp.local</c>) reach a domain controller behind a pivot; their A lookups get fake addresses.
 /// With <see cref="RemoteDnsServer.ResolveNames"/>, the relay also resolves those names here (<see cref="ResolveAsync"/>).
+/// Successful answers are kept in <paramref name="cache"/> for <see cref="DnsSettings.CacheSeconds"/>: a connection
+/// storm must not become a DNS storm through a slow tunnel.
 /// </summary>
-public sealed partial class RemoteDnsClient(ProxyRouteDialer dialer, ILogger logger, TimeProvider? timeProvider = null)
+public sealed partial class RemoteDnsClient(ProxyRouteDialer dialer, ILogger logger, DnsCache? cache = null)
 {
     private const int MaxResponse = 65535;
+    private const byte ResponseCodeMask = 0x0F;
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
-    /// <summary>How long a resolved address is reused (a connection storm must not become a DNS storm).</summary>
-    public static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(60);
+    private readonly DnsCache cache = cache ?? new DnsCache();
 
-    private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
-    private readonly ConcurrentDictionary<(string Server, string Name), (IPAddress Address, DateTimeOffset Expires)> cache = new();
+    /// <summary>The cache answers are kept in.</summary>
+    public DnsCache Cache => cache;
 
     /// <summary>
     /// Whether <paramref name="query"/> goes to the remote server: remote DNS mode, a remote server is configured, the
@@ -41,11 +42,38 @@ public sealed partial class RemoteDnsClient(ProxyRouteDialer dialer, ILogger log
                active.ShouldFakeResolve(question.Name);
     }
 
-    /// <summary>Asks the remote server; returns its response, or a SERVFAIL response when it cannot be reached.</summary>
+    /// <summary>
+    /// Asks the remote server; returns its response, or a SERVFAIL response when it cannot be reached. Answers with
+    /// response code NOERROR or NXDOMAIN come from the cache while they are fresh (with the query's ID).
+    /// </summary>
     public async Task<byte[]> QueryAsync(ActiveConfiguration active, ReadOnlyMemory<byte> query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(active);
         var server = active.Settings.Dns.RemoteServer ?? throw new InvalidOperationException("No remote DNS server is configured.");
+        var lifetime = DnsCache.Lifetime(active.Settings.Dns);
+        string? key = null;
+        if (DnsWire.TryParseQuery(query.Span, out var question))
+        {
+            key = $"remote-query {ServerKey(server)} {question.Type}/{question.Class} {Normalize(question.Name)}";
+            if (cache.TryGet<byte[]>(key, lifetime, out var cached))
+            {
+                var answer = cached.ToArray();
+                query.Span[..2].CopyTo(answer); // the ID of this query
+                return answer;
+            }
+        }
+
+        var response = await ExchangeAsync(active, server, query, cancellationToken).ConfigureAwait(false);
+        if (key is not null && response.Length > 12 && (response[3] & ResponseCodeMask) is 0 or 3)
+        {
+            cache.Set(key, response.ToArray(), lifetime);
+        }
+
+        return response;
+    }
+
+    private async Task<byte[]> ExchangeAsync(ActiveConfiguration active, RemoteDnsServer server, ReadOnlyMemory<byte> query, CancellationToken cancellationToken)
+    {
         var target = TargetEndpoint.FromAddress(IPAddress.Parse(server.Address), server.Port);
         try
         {
@@ -77,22 +105,23 @@ public sealed partial class RemoteDnsClient(ProxyRouteDialer dialer, ILogger log
 
     /// <summary>
     /// The IPv4 address of <paramref name="name"/> according to the remote server (an A query through its route), or
-    /// <see langword="null"/> when it has none or cannot be reached. Answers are cached for <see cref="CacheDuration"/>.
+    /// <see langword="null"/> when it has none or cannot be reached. Addresses are cached (failures are not).
     /// </summary>
     public async Task<IPAddress?> ResolveAsync(ActiveConfiguration active, string name, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(active);
         ArgumentException.ThrowIfNullOrEmpty(name);
         var server = active.Settings.Dns.RemoteServer ?? throw new InvalidOperationException("No remote DNS server is configured.");
-        var key = ($"{server.Address}:{server.Port} via {server.Via}", name.TrimEnd('.').ToUpperInvariant());
-        var now = clock.GetUtcNow();
-        if (cache.TryGetValue(key, out var cached) && cached.Expires > now)
+        var lifetime = DnsCache.Lifetime(active.Settings.Dns);
+        var key = $"remote-address {ServerKey(server)} {Normalize(name)}";
+        if (cache.TryGet<IPAddress>(key, lifetime, out var cached))
         {
-            return cached.Address;
+            return cached;
         }
 
         var id = (ushort)RandomNumberGenerator.GetInt32(ushort.MaxValue + 1);
-        var response = await QueryAsync(active, DnsWire.BuildQuery(id, name, DnsWire.TypeA), cancellationToken).ConfigureAwait(false);
+        // Not through QueryAsync's cache: an empty answer must not stick; only addresses are cached here.
+        var response = await ExchangeAsync(active, server, DnsWire.BuildQuery(id, name, DnsWire.TypeA), cancellationToken).ConfigureAwait(false);
         if (!DnsWire.TryParseAddresses(response, id, out var addresses, out var responseCode) ||
             addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork) is not { } address)
         {
@@ -100,9 +129,13 @@ public sealed partial class RemoteDnsClient(ProxyRouteDialer dialer, ILogger log
             return null;
         }
 
-        cache[key] = (address, now + CacheDuration);
+        cache.Set(key, address, lifetime);
         return address;
     }
+
+    private static string ServerKey(RemoteDnsServer server) => $"{server.Address}:{server.Port} via {server.Via}";
+
+    private static string Normalize(string name) => name.TrimEnd('.').ToUpperInvariant();
 
     /// <summary>A SERVFAIL response to <paramref name="query"/> (same ID and question).</summary>
     internal static byte[] ServerFailure(ReadOnlySpan<byte> query)

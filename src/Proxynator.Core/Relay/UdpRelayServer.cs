@@ -54,7 +54,8 @@ public sealed partial class UdpRelayServer : IAsyncDisposable
         FakeIpPool? fakeIps = null,
         IHostResolver? resolver = null,
         ITcpConnector? connector = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        DnsCache? dnsCache = null)
     {
         this.configuration = configuration;
         this.destinations = destinations;
@@ -64,7 +65,7 @@ public sealed partial class UdpRelayServer : IAsyncDisposable
         this.fakeIps = fakeIps;
         this.resolver = resolver ?? SystemHostResolver.Instance;
         this.connector = connector ?? TcpConnector.Default;
-        remoteDns = new RemoteDnsClient(new ProxyRouteDialer(this.connector), logger);
+        remoteDns = new RemoteDnsClient(new ProxyRouteDialer(this.connector), logger, dnsCache);
         time = timeProvider ?? TimeProvider.System;
     }
 

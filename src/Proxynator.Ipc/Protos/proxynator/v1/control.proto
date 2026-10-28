@@ -33,6 +33,9 @@ service Control {
 
   // Health checks for `proxynator doctor`.
   rpc RunDiagnostics (RunDiagnosticsRequest) returns (RunDiagnosticsResponse);
+
+  // Forgets the DNS answers Proxynator cached (and, optionally, the operating system's DNS cache).
+  rpc ClearDnsCache (ClearDnsCacheRequest) returns (ClearDnsCacheResponse);
 }
 
 message GetStatusRequest {}
@@ -53,6 +56,10 @@ message GetStatusResponse {
   string dns_mode = 12;
   // Hostnames currently mapped to fake addresses (remote DNS mode).
   int32 fake_ip_count = 13;
+  // DNS answers in Proxynator's cache.
+  int32 dns_cache_entries = 14;
+  // settings.dns.cacheSeconds: how long they are kept; 0 = off, -1 = until cleared.
+  int32 dns_cache_seconds = 15;
 }
 
 enum CaptureState {
@@ -169,4 +176,18 @@ message DiagnosticResult {
   string name = 1;
   DiagnosticStatus status = 2;
   string detail = 3;
+}
+
+message ClearDnsCacheRequest {
+  // Also clear the operating system's DNS cache (Windows DNS client, systemd-resolved).
+  bool include_system = 1;
+}
+
+message ClearDnsCacheResponse {
+  // How many cached answers were forgotten.
+  int32 cleared_entries = 1;
+  // Whether the operating system's cache was cleared (only when requested).
+  bool system_cache_cleared = 2;
+  // What happened to the operating system's cache, or why it was not cleared.
+  string system_cache_detail = 3;
 }
